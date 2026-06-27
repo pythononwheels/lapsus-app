@@ -1,0 +1,41 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# SQLite databases (dev/test)
+*.db
+*.db-*
+*.sqlite3
+
+# Peer identity key files
+*.key
+
+# Elixir / Mix
+/_build/
+/deps/
+/cover/
+/doc/api/
+*.ez
+*.beam
+/config/*.secret.exs
+erl_crash.dump
+
+# Phoenix
+/priv/static/assets/
+/priv/static/cache_manifest.json
+
+# Node (browser client, later)
+node_modules/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# Built app bundles
+/dist/
