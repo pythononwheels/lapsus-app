@@ -36,7 +36,7 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             artifact: LAPSUS-linux-x64.tar.gz
-          - os: windows-latest
+          - os: windows-2022
             target: windows-x64
             artifact: LAPSUS-windows-x64.zip
     steps:
