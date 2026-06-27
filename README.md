@@ -24,12 +24,19 @@ a thin coordinator only introduces peers and never sees your data.
 - **Use** — pick a community model, send a prompt, get the answer back P2P.
 - **Give-to-get** — sharing earns credits; using the network spends them. Offer some, get some.
 
-## Run it
+## Download
+
+**[⬇ Download for macOS (Apple Silicon)](https://github.com/pythononwheels/lapsus-app/releases/latest/download/LAPSUS-macos-arm64.zip)** — bundles its own
+runtime, defaults to the live network. First launch: right-click the app → **Open**
+(unsigned beta). Intel Macs, Windows & Linux are on the way. See all
+[releases](https://github.com/pythononwheels/lapsus-app/releases).
+
+## Run it from source
 
 The app bundles a small web UI it opens in your browser.
 
 ```bash
-# From source — needs Elixir + Rust (for the WebRTC NIF).
+# needs Elixir + Rust (for the WebRTC NIF).
 mix deps.get
 LAPSUS_COORDINATOR_URL=wss://lapsus.pyrates.io mix lapsus.app
 
