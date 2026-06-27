@@ -27,7 +27,9 @@ defmodule Lapsus.MixProject do
     agent =
       if File.dir?("apps/lapsus_agent") do
         # Client app — bundles ERTS so it runs without Elixir on the user's machine.
-        [lapsus: [applications: [lapsus_agent: :permanent], include_executables_for: [:unix]]]
+        # Build both launchers so the same release config works on macOS/Linux (bin/lapsus)
+        # and Windows (bin/lapsus.bat); the platform packaging is per-OS in CI.
+        [lapsus: [applications: [lapsus_agent: :permanent], include_executables_for: [:unix, :windows]]]
       else
         []
       end

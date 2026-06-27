@@ -1,0 +1,133 @@
+name: release
+
+# Build the LAPSUS client for every platform and attach the binaries to the
+# GitHub release for the pushed tag. The Rust NIF (ex_sctp) and the C NIFs
+# (ex_libsrtp / ex_dtls) must be compiled on each target OS, so this is a real
+# build matrix — no cross-compilation.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and release (e.g. v0.1.1-beta)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  OTP_VERSION: '27'
+  ELIXIR_VERSION: '1.18'
+  MIX_ENV: prod
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: macos-arm64
+            artifact: LAPSUS-macos-arm64.zip
+          - os: ubuntu-latest
+            target: linux-x64
+            artifact: LAPSUS-linux-x64.tar.gz
+          - os: windows-latest
+            target: windows-x64
+            artifact: LAPSUS-windows-x64.zip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: System deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsrtp2-dev libssl-dev pkg-config build-essential
+
+      - name: System deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install srtp openssl@3 pkg-config
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release
+        shell: bash
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+          mix release lapsus --overwrite
+
+      - name: Package (macOS .app)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          REUSE_RELEASE=1 scripts/build_macos_app.sh
+          mkdir -p out
+          ditto -c -k --sequesterRsrc --keepParent dist/LAPSUS.app "out/${{ matrix.artifact }}"
+
+      - name: Package (Linux tar.gz)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cat > _build/prod/rel/lapsus/run-lapsus.sh <<'EOF'
+          #!/bin/sh
+          # Launch LAPSUS: boots the local UI + sharing and opens your browser.
+          cd "$(dirname "$0")"
+          LAPSUS_RUN=1 ./bin/lapsus start
+          EOF
+          chmod +x _build/prod/rel/lapsus/run-lapsus.sh
+          mkdir -p out
+          tar czf "out/${{ matrix.artifact }}" -C _build/prod/rel lapsus
+
+      - name: Package (Windows zip)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cat > _build/prod/rel/lapsus/run-lapsus.bat <<'EOF'
+          @echo off
+          rem Launch LAPSUS: boots the local UI + sharing and opens your browser.
+          cd /d "%~dp0"
+          set LAPSUS_RUN=1
+          call bin\lapsus.bat start
+          EOF
+          mkdir -p out
+          powershell -Command "Compress-Archive -Path _build/prod/rel/lapsus -DestinationPath out/${{ matrix.artifact }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: out/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    # Only publish from the public client repo, never from a mirror/monorepo.
+    if: always() && github.repository == 'pythononwheels/lapsus-app'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -laR dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*
+          fail_on_unmatched_files: true
