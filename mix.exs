@@ -11,15 +11,28 @@ defmodule Lapsus.MixProject do
     ]
   end
 
-  # The client (provider/consumer) app release — bundles ERTS so it runs with no
-  # Elixir on the user's machine. `LAPSUS_RUN=1 bin/lapsus start`.
+  # Each release is defined only when its app is present in the umbrella, so the
+  # same mix.exs works in every context: the full monorepo (both), the coordinator
+  # Docker build (only core+coordinator copied in), and the public client export
+  # (only core+agent). Referencing an absent app would corrupt the release.
   defp releases do
-    [
-      lapsus: [
-        applications: [lapsus_agent: :permanent],
-        include_executables_for: [:unix]
-      ]
-    ]
+    coordinator =
+      if File.dir?("apps/lapsus_coordinator") do
+        # Server (no Rust/WebRTC).
+        [lapsus_coordinator: [applications: [lapsus_coordinator: :permanent], include_executables_for: [:unix]]]
+      else
+        []
+      end
+
+    agent =
+      if File.dir?("apps/lapsus_agent") do
+        # Client app — bundles ERTS so it runs without Elixir on the user's machine.
+        [lapsus: [applications: [lapsus_agent: :permanent], include_executables_for: [:unix]]]
+      else
+        []
+      end
+
+    coordinator ++ agent
   end
 
   # Dependencies listed here are available only for this
