@@ -36,9 +36,14 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             artifact: LAPSUS-linux-x64.tar.gz
-          - os: windows-2022
-            target: windows-x64
-            artifact: LAPSUS-windows-x64.zip
+          # Windows is disabled: the WebRTC native stack (ex_libsrtp/ex_dtls →
+          # shmex) depends on POSIX shared memory (`sys/mman.h`), which doesn't
+          # exist on Windows, so `mix compile` fails on :shmex. The Rust NIF
+          # (ex_sctp) itself builds fine. Re-enable once shmex gains Windows
+          # support (or via a WSL-based build):
+          # - os: windows-2022
+          #   target: windows-x64
+          #   artifact: LAPSUS-windows-x64.zip
     steps:
       - uses: actions/checkout@v4
         with:
