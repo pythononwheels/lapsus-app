@@ -158,6 +158,15 @@ defmodule LapsusAgent.UI.ConsumeLive do
   end
 
   defp format_error(:no_provider), do: "No provider online for that model right now."
+
+  defp format_error({:provider_error, reason}) when is_binary(reason) do
+    if reason =~ "insufficient_funds" do
+      "Not enough Compute-Credits for this request. Share your AI to earn some — offer some, get some."
+    else
+      "The provider couldn't serve this: #{reason}"
+    end
+  end
+
   defp format_error(other), do: inspect(other)
 
   @impl true

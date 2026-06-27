@@ -95,6 +95,17 @@ defmodule LapsusAgent.Coordinator do
     GenServer.call(server, {:submit_receipt, receipt, provider_sig, consumer_sig})
   end
 
+  @doc """
+  Pre-flight funds check: ask the coordinator whether `consumer_id` can afford
+  `est_cc`. Called by a provider before it spends compute. Returns
+  `{:ok, %{"ok" => boolean, "balance" => integer}}`.
+  """
+  @spec check_funds(GenServer.server(), String.t(), non_neg_integer()) ::
+          {:ok, map()} | {:error, term()}
+  def check_funds(server \\ __MODULE__, consumer_id, est_cc) do
+    GenServer.call(server, {:check_funds, consumer_id, est_cc})
+  end
+
   @doc "Build the authenticated WebSocket URI (also used in tests)."
   @spec auth_uri(String.t(), Identity.t()) :: String.t()
   def auth_uri(base, %Identity{} = identity) do
@@ -197,6 +208,11 @@ defmodule LapsusAgent.Coordinator do
         "consumer_sig" => consumer_sig
       })
 
+    {:noreply, assign(socket, :pending, Map.put(socket.assigns.pending, ref, from))}
+  end
+
+  def handle_call({:check_funds, consumer_id, est_cc}, from, socket) do
+    {:ok, ref} = push(socket, @lobby, "check_funds", %{"consumer_id" => consumer_id, "cc" => est_cc})
     {:noreply, assign(socket, :pending, Map.put(socket.assigns.pending, ref, from))}
   end
 

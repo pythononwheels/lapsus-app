@@ -378,7 +378,7 @@ defmodule LapsusAgent.Provider do
 
   defp dispatch(state, session, consumer, req) do
     parent = self()
-    %{identity: identity, engine: engine, settings: settings} = state
+    %{identity: identity, engine: engine, settings: settings, coordinator: coord} = state
     weight = model_weight(state, req.model)
 
     # Provider-side guardrail: always prepend our system prompt (can't be bypassed
@@ -391,22 +391,34 @@ defmodule LapsusAgent.Provider do
       |> Protocol.engine_opts()
       |> Keyword.update(:system, sys, fn user_sys -> sys <> "\n\n---\n\n" <> user_sys end)
 
+    est_cc = estimate_cc(req, settings, weight)
+
     Task.start(fn ->
-      case Engine.generate(engine, req.model, req.prompt, opts) do
-        {:ok, result} ->
-          receipt = build_receipt(identity, consumer, req, result, weight)
-          sig = Receipt.sign(identity, receipt)
-
-          Session.send_data(
-            session,
-            Protocol.encode_response(req.id, {:ok, result}, %{"receipt" => receipt, "provider_sig" => sig})
-          )
-
-          send(parent, {:job_done, consumer, result.out_tokens, result.tokens_per_sec, true})
-
-        {:error, _} = err ->
-          Session.send_data(session, Protocol.encode_response(req.id, err))
+      cond do
+        not funds_ok?(coord, consumer, est_cc) ->
+          # Pre-flight: consumer can't afford the estimated cost → don't spend
+          # compute. The real debit still happens at submit_receipt for served jobs.
+          Logger.info("[provider] refused #{req.model} (#{String.slice(consumer, 0, 12)}…): insufficient_funds")
+          Session.send_data(session, Protocol.encode_response(req.id, {:error, :insufficient_funds}))
           send(parent, {:job_done, consumer, 0, nil, false})
+
+        true ->
+          case Engine.generate(engine, req.model, req.prompt, opts) do
+            {:ok, result} ->
+              receipt = build_receipt(identity, consumer, req, result, weight)
+              sig = Receipt.sign(identity, receipt)
+
+              Session.send_data(
+                session,
+                Protocol.encode_response(req.id, {:ok, result}, %{"receipt" => receipt, "provider_sig" => sig})
+              )
+
+              send(parent, {:job_done, consumer, result.out_tokens, result.tokens_per_sec, true})
+
+            {:error, _} = err ->
+              Session.send_data(session, Protocol.encode_response(req.id, err))
+              send(parent, {:job_done, consumer, 0, nil, false})
+          end
       end
     end)
   end
@@ -448,6 +460,29 @@ defmodule LapsusAgent.Provider do
   defp cap_tokens(options, cap) when is_map(options) do
     requested = options["max_tokens"] || cap
     Map.put(options, "max_tokens", min(requested, cap))
+  end
+
+  # Estimated cost of a request *before* serving: reserve the capped output and
+  # estimate input from the prompt (~4 chars/token). Deliberately generous — we'd
+  # rather over-reserve in the pre-check than serve a consumer who can't pay.
+  defp estimate_cc(req, settings, weight) do
+    in_est = div(String.length(req.prompt), 4)
+    out_res = min(req.options["max_tokens"] || settings.max_out_per_req, settings.max_out_per_req)
+    Credits.cost(in_est, out_res, weight)
+  end
+
+  # Ask the coordinator whether the consumer can afford `est_cc`. Fail-open on a
+  # coordinator hiccup: the atomic debit at submit_receipt is the backstop, so we
+  # don't punish paying consumers for a transient signaling error.
+  defp funds_ok?(coord, consumer, est_cc) do
+    case Coordinator.check_funds(coord, consumer, est_cc) do
+      {:ok, %{"ok" => ok}} ->
+        ok
+
+      other ->
+        Logger.warning("[provider] funds check failed (#{inspect(other)}); serving anyway")
+        true
+    end
   end
 
   defp model_weight(state, model), do: Map.get(state.model_weights, model, @default_model_weight)
