@@ -81,10 +81,11 @@ jobs:
           REUSE_RELEASE=1 scripts/build_macos_app.sh
           mkdir -p out "stage/LAPSUS"
           cp -R dist/LAPSUS.app "stage/LAPSUS/LAPSUS.app"
-          # Ship a double-clickable helper next to the app: clears the unsigned-beta
-          # quarantine and opens the app (the app alone can't self-clear it).
-          cp "scripts/macos/fix-and-open.command" "stage/LAPSUS/Fix & Open LAPSUS.command"
-          chmod +x "stage/LAPSUS/Fix & Open LAPSUS.command"
+          # Ship a Terminal start script next to the app: `bash start.sh` clears the
+          # unsigned-beta quarantine and launches the app (a script run via bash isn't
+          # Gatekeeper-blocked, unlike a Finder double-click of the app or a .command).
+          cp "scripts/macos/start.sh" "stage/LAPSUS/start.sh"
+          chmod +x "stage/LAPSUS/start.sh"
           ditto -c -k --sequesterRsrc --keepParent "stage/LAPSUS" "out/${{ matrix.artifact }}"
 
       - name: Package (Linux tar.gz)
