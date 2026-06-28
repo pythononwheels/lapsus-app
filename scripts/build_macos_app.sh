@@ -37,6 +37,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleExecutable</key><string>LAPSUS</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
 </dict></plist>
 PLIST
@@ -50,6 +51,33 @@ export LAPSUS_RUN=1
 exec "$HERE/../Resources/rel/bin/lapsus" start
 LAUNCH
 chmod +x "$APP/Contents/MacOS/LAPSUS"
+
+# --- app icon: build AppIcon.icns from the logo (square, white bg, centered) ---
+ICON_SRC="apps/lapsus_agent/priv/static/lapsus.png"
+if [ -f "$ICON_SRC" ] && command -v iconutil >/dev/null 2>&1; then
+  echo "==> building app icon"
+  WORK="$(mktemp -d)"
+  ISET="$WORK/AppIcon.iconset"
+  mkdir -p "$ISET"
+  # scale logo to fit, then pad to a 1024 square on white (matches the b/w look)
+  sips -Z 880 "$ICON_SRC" --out "$WORK/scaled.png" >/dev/null
+  sips --padToHeightWidth 1024 1024 --padColor FFFFFF "$WORK/scaled.png" --out "$WORK/master.png" >/dev/null
+  gen() { sips -z "$1" "$1" "$WORK/master.png" --out "$ISET/$2" >/dev/null; }
+  gen 16   icon_16x16.png
+  gen 32   icon_16x16@2x.png
+  gen 32   icon_32x32.png
+  gen 64   icon_32x32@2x.png
+  gen 128  icon_128x128.png
+  gen 256  icon_128x128@2x.png
+  gen 256  icon_256x256.png
+  gen 512  icon_256x256@2x.png
+  gen 512  icon_512x512.png
+  gen 1024 icon_512x512@2x.png
+  iconutil -c icns "$ISET" -o "$APP/Contents/Resources/AppIcon.icns"
+  rm -rf "$WORK"
+else
+  echo "==> (skipping icon — iconutil or logo missing)"
+fi
 
 echo "==> done: $APP"
 echo "    Double-click it in Finder, or: open '$APP'"
