@@ -26,7 +26,7 @@ a thin coordinator only introduces peers and never sees your data.
 
 ## Download
 
-- **[macOS (Apple Silicon)](https://github.com/pythononwheels/lapsus-app/releases/latest/download/LAPSUS-macos-arm64.zip)** — unzip, then first launch: right-click the app → **Open** (unsigned beta).
+- **[macOS (Apple Silicon)](https://github.com/pythononwheels/lapsus-app/releases/latest/download/LAPSUS-macos-arm64.zip)** — unzip. This beta is unsigned, so the first launch is blocked: try to open it, then **System Settings → Privacy & Security → Open Anyway**. (Or in Terminal: `xattr -dr com.apple.quarantine /path/to/LAPSUS.app`.)
 - **[Linux (x64)](https://github.com/pythononwheels/lapsus-app/releases/latest/download/LAPSUS-linux-x64.tar.gz)** — unpack and run `./lapsus/run-lapsus.sh`.
 
 Both bundle their own runtime and default to the live network. Intel Macs & Windows
