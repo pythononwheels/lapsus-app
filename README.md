@@ -26,17 +26,18 @@ a thin coordinator only introduces peers and never sees your data.
 
 ## Download
 
-Fastest — no Gatekeeper prompt, macOS & Linux:
+macOS & Linux — one line, no Gatekeeper prompt:
 
 ```bash
 curl -fsSL https://lapsus.pyrates.io/install.sh | bash
 ```
 
-Fetched via curl, so macOS adds no quarantine and the app just opens (no xattr, no
-System Settings). Prefer a GUI download? Grab a zip:
+Fetched via curl, so macOS adds no quarantine — it installs into Applications and
+just opens (no xattr, no “Open Anyway”). On macOS this is the way; a downloaded
+`.zip` would be blocked by Gatekeeper.
 
-- **[macOS (Apple Silicon)](https://github.com/pythononwheels/lapsus-app/releases/latest/download/LAPSUS-macos-arm64.zip)** — unzip, then in Terminal `cd <folder> && bash start.sh`. (Or open the app, then **System Settings → Privacy & Security → Open Anyway**.)
-- **[Linux (x64)](https://github.com/pythononwheels/lapsus-app/releases/latest/download/LAPSUS-linux-x64.tar.gz)** — unpack and run `./lapsus/run-lapsus.sh`.
+On Linux you can also grab the tarball directly:
+**[Linux (x64)](https://github.com/pythononwheels/lapsus-app/releases/latest/download/LAPSUS-linux-x64.tar.gz)** — unpack and run `./lapsus/run-lapsus.sh`.
 
 Both bundle their own runtime and default to the live network. Intel Macs & Windows
 are on the way — see all [releases](https://github.com/pythononwheels/lapsus-app/releases).
