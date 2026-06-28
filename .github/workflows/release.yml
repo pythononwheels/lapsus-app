@@ -79,8 +79,13 @@ jobs:
         shell: bash
         run: |
           REUSE_RELEASE=1 scripts/build_macos_app.sh
-          mkdir -p out
-          ditto -c -k --sequesterRsrc --keepParent dist/LAPSUS.app "out/${{ matrix.artifact }}"
+          mkdir -p out "stage/LAPSUS"
+          cp -R dist/LAPSUS.app "stage/LAPSUS/LAPSUS.app"
+          # Ship a double-clickable helper next to the app: clears the unsigned-beta
+          # quarantine and opens the app (the app alone can't self-clear it).
+          cp "scripts/macos/fix-and-open.command" "stage/LAPSUS/Fix & Open LAPSUS.command"
+          chmod +x "stage/LAPSUS/Fix & Open LAPSUS.command"
+          ditto -c -k --sequesterRsrc --keepParent "stage/LAPSUS" "out/${{ matrix.artifact }}"
 
       - name: Package (Linux tar.gz)
         if: runner.os == 'Linux'
