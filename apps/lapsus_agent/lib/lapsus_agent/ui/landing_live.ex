@@ -8,7 +8,7 @@ defmodule LapsusAgent.UI.LandingLive do
   @impl true
   def mount(_params, _session, socket) do
     if Settings.onboarded?() do
-      {:ok, assign(socket, demo: "app")}
+      {:ok, assign(socket, demo: "app", quitting: false)}
     else
       {:ok, redirect(socket, to: "/welcome")}
     end
@@ -18,7 +18,24 @@ defmodule LapsusAgent.UI.LandingLive do
   def handle_event("demo", %{"demo" => d}, socket) when d in ["app", "cli"],
     do: {:noreply, assign(socket, demo: d)}
 
+  def handle_event("quit", _params, socket) do
+    Process.send_after(self(), :shutdown, 500)
+    {:noreply, assign(socket, quitting: true)}
+  end
+
   @impl true
+  def handle_info(:shutdown, socket) do
+    System.stop(0)
+    {:noreply, socket}
+  end
+
+  @impl true
+  def render(%{quitting: true} = assigns) do
+    ~H"""
+    <.shutdown_notice />
+    """
+  end
+
   def render(assigns) do
     ~H"""
     <nav class="nav">
@@ -27,6 +44,7 @@ defmodule LapsusAgent.UI.LandingLive do
       <span class="spacer"></span>
       <a href="/ask" class="btn btn-secondary">Use AI</a>
       <a href="/provider" class="btn btn-primary">Share AI</a>
+      <.quit_button />
     </nav>
 
     <section class="hero">

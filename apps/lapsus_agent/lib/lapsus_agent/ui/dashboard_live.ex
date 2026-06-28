@@ -9,11 +9,18 @@ defmodule LapsusAgent.UI.DashboardLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket), do: :timer.send_interval(1500, :tick)
-    {:ok, assign(socket, status: ProviderControl.status(), error: nil, show_settings: false, range: "week")}
+    {:ok, assign(socket, status: ProviderControl.status(), error: nil, show_settings: false, range: "week", quitting: false)}
   end
 
   @impl true
   def handle_info(:tick, socket), do: {:noreply, refresh(socket)}
+
+  # Quit the whole app: stop the BEAM after a short beat so the goodbye screen
+  # paints in the browser first. Works the same for the .app, Linux and Windows.
+  def handle_info(:shutdown, socket) do
+    System.stop(0)
+    {:noreply, socket}
+  end
 
   @impl true
   def handle_event("toggle_sharing", _params, socket) do
@@ -36,6 +43,12 @@ defmodule LapsusAgent.UI.DashboardLive do
 
   def handle_event("toggle_settings", _params, socket) do
     {:noreply, assign(socket, show_settings: !socket.assigns.show_settings)}
+  end
+
+  def handle_event("quit", _params, socket) do
+    if ProviderControl.running?(), do: ProviderControl.stop()
+    Process.send_after(self(), :shutdown, 500)
+    {:noreply, assign(socket, quitting: true)}
   end
 
   def handle_event("set_range", %{"range" => range}, socket) do
@@ -73,6 +86,12 @@ defmodule LapsusAgent.UI.DashboardLive do
   defp refresh(socket), do: assign(socket, status: ProviderControl.status(), error: nil)
 
   @impl true
+  def render(%{quitting: true} = assigns) do
+    ~H"""
+    <.shutdown_notice />
+    """
+  end
+
   def render(assigns) do
     settings = Map.get(assigns.status, :settings)
     put_separator(if settings, do: Settings.separator(settings), else: ".")
@@ -84,6 +103,7 @@ defmodule LapsusAgent.UI.DashboardLive do
       <span class="muted" style="font-size:.95rem">Share AI</span>
       <span class="spacer"></span>
       <a href="/ask" class="lnk">Use the network →</a>
+      <.quit_button />
     </nav>
 
     <div style="height:1.5rem"></div>

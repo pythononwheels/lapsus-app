@@ -33,12 +33,18 @@ defmodule LapsusAgent.UI.ConsumeLive do
        result: nil,
        error: nil,
        usage: nil,
-       loading_usage: connected?(socket)
+       loading_usage: connected?(socket),
+       quitting: false
      )
      |> allow_upload(:doc, accept: :any, max_entries: 1, max_file_size: 4_000_000)}
   end
 
   @impl true
+  def handle_info(:shutdown, socket) do
+    System.stop(0)
+    {:noreply, socket}
+  end
+
   def handle_info(:load_models, socket) do
     parent = self()
     Task.start(fn -> send(parent, {:models, Consumer.network_models()}) end)
@@ -83,6 +89,11 @@ defmodule LapsusAgent.UI.ConsumeLive do
   end
 
   def handle_event("tab", _params, socket), do: {:noreply, assign(socket, tab: :ask)}
+
+  def handle_event("quit", _params, socket) do
+    Process.send_after(self(), :shutdown, 500)
+    {:noreply, assign(socket, quitting: true)}
+  end
 
   def handle_event("refresh_usage", _params, socket) do
     send(self(), :load_usage)
@@ -170,6 +181,12 @@ defmodule LapsusAgent.UI.ConsumeLive do
   defp format_error(other), do: inspect(other)
 
   @impl true
+  def render(%{quitting: true} = assigns) do
+    ~H"""
+    <.shutdown_notice />
+    """
+  end
+
   def render(assigns) do
     put_separator(Settings.separator(assigns.settings))
 
@@ -184,6 +201,7 @@ defmodule LapsusAgent.UI.ConsumeLive do
       <span class="muted" style="font-size:.95rem">Use AI</span>
       <span class="spacer"></span>
       <a href="/provider" class="lnk">Share your AI →</a>
+      <.quit_button />
     </nav>
 
     <div style="height:1.5rem"></div>

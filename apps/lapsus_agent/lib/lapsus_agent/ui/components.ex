@@ -51,6 +51,32 @@ defmodule LapsusAgent.UI.Components do
   end
 
   @doc """
+  Nav button that quits the whole app (stops the BEAM). The hosting LiveView must
+  handle the `"quit"` event (set `quitting: true`, schedule `:shutdown`) and the
+  `:shutdown` info (call `System.stop/1`) — see `shutdown_notice/1`.
+  """
+  def quit_button(assigns) do
+    ~H"""
+    <button type="button" phx-click="quit"
+            data-confirm="Quit LAPSUS? You'll go offline and the app will close."
+            class="lnk" title="Quit LAPSUS" aria-label="Quit LAPSUS"
+            style="background:none;border:0;cursor:pointer;font:inherit;color:var(--muted)"
+            onmouseover="this.style.color='#c0392b'" onmouseout="this.style.color='var(--muted)'">⏻ Quit</button>
+    """
+  end
+
+  @doc "The \"shutting down\" screen shown after Quit while the BEAM stops."
+  def shutdown_notice(assigns) do
+    ~H"""
+    <nav class="nav"><.brand /></nav>
+    <div class="card" style="text-align:center;max-width:34rem;margin:6rem auto;border-color:var(--fg)">
+      <h3 style="margin-bottom:.4rem">LAPSUS is shutting down…</h3>
+      <p class="muted" style="margin:0">You're now offline. You can close this tab.</p>
+    </div>
+    """
+  end
+
+  @doc """
   Architecture diagram: a thin coordinator that only introduces peers, with the
   actual prompt/answer flowing directly between two peers (P2P).
   """
