@@ -39,6 +39,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>NSLocalNetworkUsageDescription</key><string>LAPSUS connects directly to other peers to send and receive AI requests, peer to peer.</string>
 </dict></plist>
 PLIST
 
@@ -77,6 +78,18 @@ if [ -f "$ICON_SRC" ] && command -v iconutil >/dev/null 2>&1; then
   rm -rf "$WORK"
 else
   echo "==> (skipping icon — iconutil or logo missing)"
+fi
+
+# --- ad-hoc code signing ---
+# Unsigned bundles make macOS attribute network access (and the Local Network
+# prompt) to the bare "beam.smp" binary. An ad-hoc signature ties the nested
+# binaries to the bundle, so macOS shows "LAPSUS" + our usage description. (It is
+# NOT a trusted signature — Gatekeeper still needs notarization or the curl path.)
+if command -v codesign >/dev/null 2>&1; then
+  echo "==> ad-hoc signing the bundle"
+  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 \
+    && echo "    signed (ad-hoc)" \
+    || echo "    (codesign failed — shipping unsigned)"
 fi
 
 echo "==> done: $APP"
