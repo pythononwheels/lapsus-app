@@ -253,11 +253,11 @@ defmodule LapsusAgent.UI.Layouts do
           .appbar .pid{font-family:ui-monospace,Menlo,monospace;font-size:.76rem;color:var(--muted)}
           .killswitch{display:inline-flex;align-items:center;gap:.45rem;font-size:.8rem;color:var(--fg)}
           .shell{display:grid;grid-template-columns:208px 1fr;min-height:calc(100vh - 50px);background:var(--soft)}
-          .rail{border-right:1px solid var(--line);background:#fff;padding:1rem .7rem}
-          .rail a{display:flex;align-items:center;padding:.5rem .7rem;border-radius:9px;color:var(--fg);font-size:.92rem;text-decoration:none}
+          .rail{border-right:1px solid var(--line);background:#fff;padding:1.5rem 1rem}
+          .rail a{display:flex;align-items:center;padding:.6rem .8rem;margin-bottom:.12rem;border-radius:9px;color:var(--fg);font-size:.92rem;text-decoration:none}
           .rail a.on{background:var(--fg);color:#fff}
           .rail a:hover:not(.on){background:var(--soft);text-decoration:none}
-          .rail .grp{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;margin:.9rem .7rem .3rem}
+          .rail .grp{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;margin:1.8rem .8rem .35rem}
           /* console pages: a plain white surface; content grouped into bordered cards */
           .main{padding:1.6rem 1.9rem;min-width:0;background:#fff}
           .main h1{font-size:1.4rem;margin:0 0 .25rem}
