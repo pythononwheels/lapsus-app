@@ -92,6 +92,12 @@ defmodule LapsusAgent.UI.LandingLive do
     end
   end
 
+  def handle_event("check_update", _params, socket) do
+    parent = self()
+    Task.start(fn -> send(parent, {:update_result, LapsusAgent.Version.check_update()}) end)
+    {:noreply, assign(socket, update: :checking)}
+  end
+
   def handle_event("set_range", %{"range" => range}, socket) do
     parent = self()
     days = range_days(range)
@@ -210,6 +216,11 @@ defmodule LapsusAgent.UI.LandingLive do
           peer {@peer_id}<br />
           {console_line(@running, @status)}
         </div>
+        <div class="verrow">
+          <span class="muted">Version {LapsusAgent.Version.current()}</span>
+          <button class="pill" phx-click="check_update" disabled={@update == :checking}>Check for updates</button>
+          <span :if={update_status_text(@update) != ""} class="muted">{update_status_text(@update)}</span>
+        </div>
       </section>
     </.app_shell>
     """
@@ -217,6 +228,14 @@ defmodule LapsusAgent.UI.LandingLive do
 
   defp update_tag({:update, tag, _url}), do: tag
   defp update_url({:update, _tag, url}), do: url
+
+  defp update_status_text(:checking), do: "Checking…"
+  defp update_status_text(:current), do: "You're up to date ✓"
+  defp update_status_text({:update, tag, _url}), do: "Update available — #{tag}"
+  defp update_status_text({:dev, tag, _url}), do: "Dev build · latest is #{tag}"
+  defp update_status_text(:dev), do: "Development build"
+  defp update_status_text(:unknown), do: "Couldn't reach GitHub"
+  defp update_status_text(_), do: ""
 
   defp tile_val(nil), do: "—"
   defp tile_val(false), do: "—"

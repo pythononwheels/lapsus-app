@@ -182,6 +182,8 @@ defmodule LapsusAgent.UI.Layouts do
           .pill{font:inherit;font-size:.78rem;color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:999px;padding:.18rem .6rem;cursor:pointer}
           .pill:hover{border-color:var(--fg);color:var(--fg)}
           .pill.on{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+          .pill:disabled{opacity:.5;cursor:default}
+          .verrow{display:flex;align-items:center;gap:.7rem;margin-top:.9rem;font-size:.85rem;flex-wrap:wrap}
           /* usage two-column: time chart + model donut, each its own framed panel */
           .usage-grid{display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-top:1rem;align-items:stretch}
           @media (max-width:640px){.usage-grid{grid-template-columns:1fr}}
