@@ -395,9 +395,10 @@ defmodule LapsusAgent.Provider do
 
     Task.start(fn ->
       cond do
-        not funds_ok?(coord, consumer, est_cc) ->
-          # Pre-flight: consumer can't afford the estimated cost → don't spend
-          # compute. The real debit still happens at submit_receipt for served jobs.
+        not reserve_ok?(coord, consumer, req.id, est_cc) ->
+          # Escrow: reserve the estimated cost before spending compute. If the
+          # consumer can't afford it, don't serve. The hold clears at submit_receipt
+          # (settlement) or via the coordinator's reaper if the job never completes.
           Logger.info("[provider] refused #{req.model} (#{String.slice(consumer, 0, 12)}…): insufficient_funds")
           Session.send_data(session, Protocol.encode_response(req.id, {:error, :insufficient_funds}))
           send(parent, {:job_done, consumer, 0, nil, false})
@@ -471,16 +472,16 @@ defmodule LapsusAgent.Provider do
     Credits.cost(in_est, out_res, weight)
   end
 
-  # Ask the coordinator whether the consumer can afford `est_cc`. Fail-open on a
-  # coordinator hiccup: the atomic debit at submit_receipt is the backstop, so we
-  # don't punish paying consumers for a transient signaling error.
-  defp funds_ok?(coord, consumer, est_cc) do
-    case Coordinator.check_funds(coord, consumer, est_cc) do
+  # Escrow-reserve the estimated cost before serving. Fail-open on a coordinator
+  # hiccup: settlement at submit_receipt stays the backstop, so we don't punish
+  # paying consumers for a transient signaling error.
+  defp reserve_ok?(coord, consumer, request_id, est_cc) do
+    case Coordinator.reserve(coord, consumer, request_id, est_cc) do
       {:ok, %{"ok" => ok}} ->
         ok
 
       other ->
-        Logger.warning("[provider] funds check failed (#{inspect(other)}); serving anyway")
+        Logger.warning("[provider] reserve failed (#{inspect(other)}); serving anyway")
         true
     end
   end

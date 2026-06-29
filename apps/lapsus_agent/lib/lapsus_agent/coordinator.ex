@@ -106,6 +106,18 @@ defmodule LapsusAgent.Coordinator do
     GenServer.call(server, {:check_funds, consumer_id, est_cc})
   end
 
+  @doc """
+  Escrow-reserve `est_cc` from `consumer_id` for `request_id` before serving (the
+  hard version of `check_funds`). Returns `{:ok, %{"ok" => true}}` on success or
+  `{:error, ...}` (e.g. insufficient funds). The hold clears at settlement or via
+  the coordinator's reaper.
+  """
+  @spec reserve(GenServer.server(), String.t(), String.t(), non_neg_integer()) ::
+          {:ok, map()} | {:error, term()}
+  def reserve(server \\ __MODULE__, consumer_id, request_id, est_cc) do
+    GenServer.call(server, {:reserve, consumer_id, request_id, est_cc})
+  end
+
   @doc "Build the authenticated WebSocket URI (also used in tests)."
   @spec auth_uri(String.t(), Identity.t()) :: String.t()
   def auth_uri(base, %Identity{} = identity) do
@@ -213,6 +225,17 @@ defmodule LapsusAgent.Coordinator do
 
   def handle_call({:check_funds, consumer_id, est_cc}, from, socket) do
     {:ok, ref} = push(socket, @lobby, "check_funds", %{"consumer_id" => consumer_id, "cc" => est_cc})
+    {:noreply, assign(socket, :pending, Map.put(socket.assigns.pending, ref, from))}
+  end
+
+  def handle_call({:reserve, consumer_id, request_id, est_cc}, from, socket) do
+    {:ok, ref} =
+      push(socket, @lobby, "reserve", %{
+        "consumer_id" => consumer_id,
+        "request_id" => request_id,
+        "cc" => est_cc
+      })
+
     {:noreply, assign(socket, :pending, Map.put(socket.assigns.pending, ref, from))}
   end
 
