@@ -271,9 +271,6 @@ defmodule LapsusAgent.UI.Layouts do
           .dcard.update .btn{margin-left:auto;flex:none}
           .dcard h3{font-size:1.05rem;margin:0}
           .dcard > h3{margin-bottom:.9rem}
-          .dcard-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:.9rem}
-          .dcard-head h3{font-size:1.05rem;margin:0}
-          .ver-badge{font-family:ui-monospace,Menlo,monospace;font-size:.74rem;color:var(--muted);flex:none}
           .dcard .tile{background:var(--soft);border-color:transparent}
           .dcard .panel{background:var(--soft);border-color:transparent}
           .console{font-family:ui-monospace,Menlo,monospace;font-size:.8rem;color:#57606a;line-height:1.8;overflow-wrap:anywhere}

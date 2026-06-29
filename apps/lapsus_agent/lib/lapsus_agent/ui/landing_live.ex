@@ -210,10 +210,7 @@ defmodule LapsusAgent.UI.LandingLive do
       </section>
 
       <section class="dcard">
-        <div class="dcard-head">
-          <h3>Status</h3>
-          <span class="ver-badge">{LapsusAgent.Version.current()}</span>
-        </div>
+        <h3>Status</h3>
         <dl class="kv">
           <dt>Connected to</dt>
           <dd><span class="ok">●</span> lapsus.pyrates.io</dd>
@@ -226,6 +223,9 @@ defmodule LapsusAgent.UI.LandingLive do
 
           <dt>Sharing</dt>
           <dd>{if @running, do: "On", else: "Off"}</dd>
+
+          <dt>Version</dt>
+          <dd>{LapsusAgent.Version.current()}</dd>
 
           <dt>Updates</dt>
           <dd>
