@@ -255,12 +255,12 @@ defmodule LapsusAgent.UI.Layouts do
           .main{padding:1.6rem 1.9rem;min-width:0;background:#fff}
           .main h1{font-size:1.4rem;margin:0 0 .25rem}
           .main .sub{color:#475160;margin:0 0 1.4rem;font-size:.92rem}
-          .dcard{background:#fff;border:1px solid rgba(22,24,29,.4);border-radius:14px;padding:1.2rem 1.4rem;margin:0 0 1.2rem;overflow:hidden}
+          .dcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:1.2rem 1.4rem;margin:0 0 1.2rem;overflow:hidden;box-shadow:0 1px 3px rgba(20,24,28,.06),0 1px 2px rgba(20,24,28,.04)}
           .dcard:last-child{margin-bottom:0}
           .dcard h3{font-size:1.05rem;margin:0}
           .dcard > h3{margin-bottom:.9rem}
           .dcard .tile{background:var(--soft);border-color:transparent}
-          .dcard .panel{background:var(--soft)}
+          .dcard .panel{background:var(--soft);border-color:transparent}
           .console{font-family:ui-monospace,Menlo,monospace;font-size:.8rem;color:#57606a;line-height:1.8;overflow-wrap:anywhere}
           .console .ok{color:#1f9d55}
           @media (max-width:760px){.shell{grid-template-columns:1fr}.rail{border-right:0;border-bottom:1px solid var(--line)}}
