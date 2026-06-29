@@ -67,13 +67,15 @@ defmodule LapsusAgent.UI.Components do
 
   attr :active, :atom, default: :home
   attr :peer_id, :string, default: nil
+  attr :sharing, :boolean, default: false
   slot :inner_block, required: true
 
   @doc """
-  The local app's management shell — a top app bar (brand + "running locally" +
-  short peer id + Quit) and a left rail (Home / Share AI / Use AI + the network),
-  wrapping the page content. Makes the local console clearly distinct from the
-  public homepage. The hosting LiveView must handle `"quit"` + `:shutdown`.
+  The local app's management shell — a top app bar (brand + "running locally" + a
+  global Sharing kill-switch + short peer id + Quit) and a left rail (Dashboard /
+  Share AI / Use AI + the network), wrapping the page content. Makes the local
+  console clearly distinct from the public homepage. The hosting LiveView must
+  handle `"quit"`, `:shutdown` and `"toggle_sharing"`.
   """
   def app_shell(assigns) do
     ~H"""
@@ -81,13 +83,19 @@ defmodule LapsusAgent.UI.Components do
       <a href="/" class="brand"><.logo size={28} /> LAPSUS</a>
       <span class="live"><span class="d"></span> Running locally</span>
       <span style="flex:1"></span>
+      <span class="killswitch">
+        Sharing
+        <button class={"sw #{if @sharing, do: "on"}"} phx-click="toggle_sharing" aria-label="toggle sharing">
+          <span class="knob"></span>
+        </button>
+      </span>
       <span :if={@peer_id} class="pid" title={@peer_id}>{short_id(@peer_id)}</span>
       <.quit_button />
     </div>
 
     <div class="shell">
       <nav class="rail">
-        <a href="/" class={if @active == :home, do: "on"}>⌂ &nbsp; Home</a>
+        <a href="/" class={if @active == :home, do: "on"}>⌂ &nbsp; Dashboard</a>
         <a href="/provider" class={if @active == :share, do: "on"}>↑ &nbsp; Share AI</a>
         <a href="/ask" class={if @active == :use, do: "on"}>↓ &nbsp; Use AI</a>
         <div class="grp">Network</div>

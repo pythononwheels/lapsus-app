@@ -3,8 +3,7 @@ defmodule LapsusAgent.UI.ConsumeLive do
   use Phoenix.LiveView
   import LapsusAgent.UI.Components
 
-  alias LapsusAgent.{Consumer, Settings}
-  alias LapsusAgent.UI.Charts
+  alias LapsusAgent.{Consumer, ProviderControl, Settings}
 
   @usage_days 30
 
@@ -18,7 +17,6 @@ defmodule LapsusAgent.UI.ConsumeLive do
     {:ok,
      socket
      |> assign(
-       tab: :ask,
        settings: Settings.load(),
        models: [],
        loading_models: connected?(socket),
@@ -35,6 +33,7 @@ defmodule LapsusAgent.UI.ConsumeLive do
        usage: nil,
        loading_usage: connected?(socket),
        quitting: false,
+       sharing: ProviderControl.running?(),
        peer_id: Consumer.peer_id()
      )
      |> allow_upload(:doc, accept: :any, max_entries: 1, max_file_size: 4_000_000)}
@@ -84,21 +83,19 @@ defmodule LapsusAgent.UI.ConsumeLive do
   end
 
   @impl true
-  def handle_event("tab", %{"tab" => "activity"}, socket) do
-    if socket.assigns.usage == nil and not socket.assigns.loading_usage, do: send(self(), :load_usage)
-    {:noreply, assign(socket, tab: :activity)}
-  end
+  def handle_event("toggle_sharing", _params, socket) do
+    if ProviderControl.running?() do
+      ProviderControl.stop()
+    else
+      ProviderControl.start()
+    end
 
-  def handle_event("tab", _params, socket), do: {:noreply, assign(socket, tab: :ask)}
+    {:noreply, assign(socket, sharing: ProviderControl.running?())}
+  end
 
   def handle_event("quit", _params, socket) do
     Process.send_after(self(), :shutdown, 500)
     {:noreply, assign(socket, quitting: true)}
-  end
-
-  def handle_event("refresh_usage", _params, socket) do
-    send(self(), :load_usage)
-    {:noreply, socket}
   end
 
   def handle_event("toggle_dropdown", _params, socket), do: {:noreply, assign(socket, open: !socket.assigns.open)}
@@ -191,19 +188,16 @@ defmodule LapsusAgent.UI.ConsumeLive do
   def render(assigns) do
     put_separator(Settings.separator(assigns.settings))
 
-    assigns =
-      assigns
-      |> assign(:ctx_warn, ctx_warning(assigns.est_in, assigns.selected, assigns.models))
-      |> assign(:locale, Settings.chart_locale(assigns.settings))
+    assigns = assign(assigns, :ctx_warn, ctx_warning(assigns.est_in, assigns.selected, assigns.models))
 
     ~H"""
-    <.app_shell active={:use} peer_id={@peer_id}>
-    <div class="tabs">
-      <button class={"tab #{if @tab == :ask, do: "on"}"} phx-click="tab" phx-value-tab="ask">Ask</button>
-      <button class={"tab #{if @tab == :activity, do: "on"}"} phx-click="tab" phx-value-tab="activity">Activity</button>
+    <.app_shell active={:use} peer_id={@peer_id} sharing={@sharing}>
+    <h1>Use AI</h1>
+    <div class="sub">
+      Tap a model someone else is sharing — your prompt travels straight to their machine, peer to peer.
     </div>
 
-    <div :if={@tab == :ask} id="ask-pane">
+    <div id="ask-pane">
       <div class="card sec">
         <div class="row">
           <h3>Use the network</h3>
@@ -299,50 +293,9 @@ defmodule LapsusAgent.UI.ConsumeLive do
       </div>
     </div>
 
-    <div :if={@tab == :activity} class="card sec">
-      <div class="row">
-        <h3>Your activity <span class="muted">· last 30 days</span></h3>
-        <button class="gear" phx-click="refresh_usage" title="refresh">↻</button>
-      </div>
-      <div class="body">
-        <div :if={@loading_usage and !@usage} class="muted" style="font-size:.9rem">Loading…</div>
-        <div :if={!@loading_usage and !cusage?(@usage)} class="muted" style="font-size:.9rem">
-          You haven't sent any requests in this window yet.
-        </div>
-
-        <div :if={cusage?(@usage)}>
-          <div class="tiles">
-            <div class="tile"><strong>{num(@usage["totals"]["jobs"])}</strong><span class="muted">requests</span></div>
-            <div class="tile"><strong>{num(@usage["totals"]["in"])}</strong><span class="muted">in tokens</span></div>
-            <div class="tile"><strong>{num(@usage["totals"]["out"])}</strong><span class="muted">out tokens</span></div>
-            <div class="tile"><strong>{num(@usage["totals"]["cc"])}</strong><span class="muted">CC spent</span></div>
-          </div>
-
-          <div class="usage-grid">
-            <section class="panel">
-              <h4>Requests over time</h4>
-              <div class="chartbox" id="cons-bar" phx-hook="Chart" data-chart={Charts.json(Charts.bar_data(@usage["days"], @locale))}>
-                <canvas></canvas>
-              </div>
-            </section>
-
-            <section :if={@usage["by_model"] != []} class="panel">
-              <h4>By model <span class="muted">· out tokens</span></h4>
-              <div class="chartbox donut" id="cons-donut" phx-hook="Chart" data-chart={Charts.json(Charts.donut_data(@usage["by_model"], @locale))}>
-                <canvas></canvas>
-              </div>
-            </section>
-          </div>
-        </div>
-      </div>
-    </div>
-
     </.app_shell>
     """
   end
-
-  defp cusage?(u) when is_map(u), do: (u["totals"]["jobs"] || 0) > 0
-  defp cusage?(_), do: false
 
   defp has_text?(s), do: is_binary(s) and String.trim(s) != ""
 

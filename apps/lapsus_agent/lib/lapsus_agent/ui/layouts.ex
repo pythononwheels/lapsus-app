@@ -191,6 +191,9 @@ defmodule LapsusAgent.UI.Layouts do
           /* Chart.js canvas containers (sized; chart fills) */
           .chartbox{position:relative;height:248px;width:100%}
           .chartbox.donut{height:210px}
+          /* faint "no data" overlay shown over an empty (but still framed) chart */
+          .chartbox .nodata{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+                            color:var(--muted);opacity:.5;font-size:.85rem;pointer-events:none}
           /* use-AI: file upload + estimate row */
           .uploadrow{display:flex;align-items:center;gap:.6rem;margin-top:.6rem;flex-wrap:wrap}
           .filebtn{display:inline-flex;align-items:center;gap:.3rem;font-size:.82rem;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:.32rem .6rem;cursor:pointer;width:auto}
@@ -241,6 +244,7 @@ defmodule LapsusAgent.UI.Layouts do
           .live{display:inline-flex;align-items:center;gap:.4rem;font-size:.8rem;border:1px solid var(--line);border-radius:999px;padding:.18rem .55rem;color:var(--fg)}
           .live .d{width:.5rem;height:.5rem;border-radius:50%;background:#1f9d55;display:inline-block}
           .appbar .pid{font-family:ui-monospace,Menlo,monospace;font-size:.76rem;color:var(--muted)}
+          .killswitch{display:inline-flex;align-items:center;gap:.45rem;font-size:.8rem;color:var(--fg)}
           .shell{display:grid;grid-template-columns:208px 1fr;min-height:calc(100vh - 50px);background:var(--soft)}
           .rail{border-right:1px solid var(--line);background:#fff;padding:1rem .7rem}
           .rail a{display:flex;align-items:center;padding:.5rem .7rem;border-radius:9px;color:var(--fg);font-size:.92rem;text-decoration:none}

@@ -127,6 +127,40 @@ defmodule LapsusAgent.Consumer do
   end
 
   @doc """
+  The full usage map for this peer over `days` — both the provider view (jobs
+  served) and the consumer view (requests sent) plus the current `balance` —
+  fetched directly from the coordinator regardless of whether this peer is
+  currently sharing. Powers the always-on Dashboard charts.
+
+  Returns `{:ok, %{"provider" => ..., "consumer" => ..., "balance" => ...}}`.
+  """
+  @spec full_usage(pos_integer(), keyword()) :: {:ok, map()} | {:error, term()}
+  def full_usage(days \\ 7, opts \\ []) do
+    identity =
+      opts[:identity] ||
+        Identity.load_or_create!(opts[:identity_path] || default_identity_path())
+
+    timeout = opts[:timeout] || @default_timeout
+
+    {:ok, coord} =
+      Coordinator.start_link(
+        identity: identity,
+        url: opts[:url] || Coordinator.default_url(),
+        role: "consumer",
+        handler: self()
+      )
+
+    result =
+      case await_join(timeout) do
+        :ok -> Coordinator.usage(coord, days)
+        e -> e
+      end
+
+    safe_stop(coord)
+    result
+  end
+
+  @doc """
   This peer's id — loads (or creates) the on-disk identity, independent of whether
   the provider is currently sharing. For showing the node id in the UI even offline.
   """

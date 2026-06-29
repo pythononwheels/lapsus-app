@@ -4,12 +4,11 @@ defmodule LapsusAgent.UI.DashboardLive do
   import LapsusAgent.UI.Components
 
   alias LapsusAgent.{Consumer, Provider, ProviderControl, Settings}
-  alias LapsusAgent.UI.Charts
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket), do: :timer.send_interval(1500, :tick)
-    {:ok, assign(socket, status: ProviderControl.status(), peer_id: Consumer.peer_id(), error: nil, show_settings: false, range: "week", quitting: false)}
+    {:ok, assign(socket, status: ProviderControl.status(), peer_id: Consumer.peer_id(), error: nil, show_settings: false, quitting: false)}
   end
 
   @impl true
@@ -51,12 +50,6 @@ defmodule LapsusAgent.UI.DashboardLive do
     {:noreply, assign(socket, quitting: true)}
   end
 
-  def handle_event("set_range", %{"range" => range}, socket) do
-    days = Enum.find_value(ranges(), 7, fn {l, d} -> if l == range, do: d end)
-    if ProviderControl.running?(), do: Provider.set_usage_window(days)
-    {:noreply, refresh(assign(socket, range: range))}
-  end
-
   def handle_event("update_settings", params, socket) do
     if ProviderControl.running?() do
       Provider.set_settings(Settings.update(socket.assigns.status.settings, params))
@@ -95,38 +88,33 @@ defmodule LapsusAgent.UI.DashboardLive do
   def render(assigns) do
     settings = Map.get(assigns.status, :settings)
     put_separator(if settings, do: Settings.separator(settings), else: ".")
-    assigns = assign(assigns, :locale, if(settings, do: Settings.chart_locale(settings), else: "de-DE"))
 
     ~H"""
-    <.app_shell active={:share} peer_id={@peer_id}>
+    <.app_shell active={:share} peer_id={@peer_id} sharing={@status.running}>
     <div :if={@error} class="card" style="border-color:var(--fg)">{@error}</div>
 
-    <div class="card sec" id="sharing-card">
-      <div class="row">
-        <h3>Sharing</h3>
-        <button class={"sw #{if @status.running, do: "on"}"} phx-click="toggle_sharing" aria-label="toggle sharing">
-          <span class="knob"></span>
-        </button>
-      </div>
-      <div class="body">
-        <span>
-          <span class={"dot #{if @status.running, do: "on", else: "off"}"}></span>
-          <span class="muted">You are:</span>
-          <strong>{if @status.running, do: "Online", else: "Offline"}</strong>
-        </span>
-        <div class="muted" style="font-size:.88rem;margin-top:.15rem">
-          {if @status.running, do: "Your machine is part of the commons. Switch off to go immediately offline.", else: "Flip the switch to start sharing your local AI."}
-        </div>
-        <div :if={@status.running} class="tiles" style="grid-template-columns:repeat(3,1fr);margin-top:.85rem">
-          <div class="tile"><strong>{num(@status.earned_today)}</strong><span class="muted">CC earned today</span></div>
-          <div class="tile"><strong>{num(@status.balance)}</strong><span class="muted">CC balance</span></div>
-          <div class="tile"><strong>{num(@status.served_today)}</strong><span class="muted">requests served today</span></div>
-        </div>
+    <h1>Share AI</h1>
+    <div class="sub">
+      Put your idle GPU to work for the community. Choose your engine and the models you share —
+      the global Sharing switch lives in the top bar.
+    </div>
 
-        <div :if={@status.running} class="enginerow">
+    <div :if={!@status.running} class="card sec">
+      <div class="body" style="margin-top:0">
+        <span class="muted" style="font-size:.92rem">
+          Sharing is off — turn it on in the top bar to choose your engine and models.
+        </span>
+      </div>
+    </div>
+
+    <div :if={@status.running} class="card sec">
+      <h3>Engine</h3>
+      <div class="body">
+        <div class="enginerow">
           <button class={"engside #{if @status.engine == :openai, do: "on"}"}
                   phx-click="set_engine" phx-value-engine="openai" disabled={:openai not in @status.available}>
             <.engine_icon engine={:openai} size={14} /> LM Studio
+            <span :if={:openai not in @status.available} class="muted" style="font-size:.78rem">(not detected)</span>
             <span class={"hdot #{if :openai in @status.available, do: "up", else: "down"}"}></span>
           </button>
           <button class={"sw #{if @status.engine == :ollama, do: "on"}"}
@@ -139,47 +127,29 @@ defmodule LapsusAgent.UI.DashboardLive do
                   phx-click="set_engine" phx-value-engine="ollama" disabled={:ollama not in @status.available}>
             <span class={"hdot #{if :ollama in @status.available, do: "up", else: "down"}"}></span>
             <.engine_icon engine={:ollama} size={14} /> Ollama
+            <span :if={:ollama not in @status.available} class="muted" style="font-size:.78rem">(not detected)</span>
           </button>
         </div>
       </div>
     </div>
 
     <div :if={@status.running} class="card sec">
-      <div class="row">
-        <h3>Usage <span class="muted">· {range_label(@range)}</span></h3>
-        <div class="pills">
-          <button :for={{label, _d} <- ranges()} class={"pill #{if @range == label, do: "on"}"}
-                  phx-click="set_range" phx-value-range={label}>{label}</button>
-        </div>
-      </div>
+      <h3>Shared models <span :if={@status.models == []} class="muted">— none detected</span></h3>
       <div class="body">
-        <div :if={!usage?(@status)} class="muted" style="font-size:.9rem">
-          No jobs served in this window yet.
+        <div :if={@status.models != []} class="mrow mhead">
+          <span class="muted">Available models on your machine</span>
+          <span class="muted">Share</span>
         </div>
-        <div :if={usage?(@status)}>
-          <div class="row">
-            <span class="muted">Total</span>
-            <span>
-              {num(@status.usage_stats["totals"]["jobs"])} jobs ·
-              {num(@status.usage_stats["totals"]["in"])} in / {num(@status.usage_stats["totals"]["out"])} out tokens
-            </span>
-          </div>
-
-          <div class="usage-grid">
-            <section class="panel">
-              <h4>Tokens served over time</h4>
-              <div class="chartbox" id="prov-bar" phx-hook="Chart" data-chart={Charts.json(Charts.bar_data(@status.usage_stats["days"], @locale))}>
-                <canvas></canvas>
-              </div>
-            </section>
-
-            <section :if={@status.usage_stats["by_model"] != []} class="panel">
-              <h4>Model share <span class="muted">· out tokens</span></h4>
-              <div class="chartbox donut" id="prov-donut" phx-hook="Chart" data-chart={Charts.json(Charts.donut_data(@status.usage_stats["by_model"], @locale))}>
-                <canvas></canvas>
-              </div>
-            </section>
-          </div>
+        <div :for={m <- @status.models} class={"mrow #{unless m.enabled, do: "off"}"}>
+          <span>
+            <span class="name">{m.name}</span>
+            <span :if={m.loaded} class="tag">loaded</span>
+          </span>
+          <button class={"sw #{if m.enabled, do: "on"}"} phx-click="toggle_model"
+                  phx-value-model={m.name} phx-value-on={to_string(!m.enabled)}
+                  aria-label={"toggle #{m.name}"}>
+            <span class="knob"></span>
+          </button>
         </div>
       </div>
     </div>
@@ -251,27 +221,6 @@ defmodule LapsusAgent.UI.DashboardLive do
     </div>
 
     <div :if={@status.running} class="card sec">
-      <h3>Shared models <span :if={@status.models == []} class="muted">— none detected</span></h3>
-      <div class="body">
-        <div :if={@status.models != []} class="mrow mhead">
-          <span class="muted">Available models on your machine</span>
-          <span class="muted">Share</span>
-        </div>
-        <div :for={m <- @status.models} class={"mrow #{unless m.enabled, do: "off"}"}>
-          <span>
-            <span class="name">{m.name}</span>
-            <span :if={m.loaded} class="tag">loaded</span>
-          </span>
-          <button class={"sw #{if m.enabled, do: "on"}"} phx-click="toggle_model"
-                  phx-value-model={m.name} phx-value-on={to_string(!m.enabled)}
-                  aria-label={"toggle #{m.name}"}>
-            <span class="knob"></span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div :if={@status.running} class="card sec">
       <h3>Status</h3>
       <div class="body kvs">
         <div class="row">
@@ -292,9 +241,6 @@ defmodule LapsusAgent.UI.DashboardLive do
     </.app_shell>
     """
   end
-
-  defp usage?(%{usage_stats: u}) when is_map(u), do: (u["totals"]["jobs"] || 0) > 0
-  defp usage?(_), do: false
 
   defp engine_label(:ollama), do: "Ollama"
   defp engine_label(:openai), do: "LM Studio / OpenAI-compatible"
@@ -350,12 +296,4 @@ defmodule LapsusAgent.UI.DashboardLive do
     """
   end
 
-  # Selectable windows for the usage dashboard. {label, days}.
-  defp ranges,
-    do: [{"week", 7}, {"month", 30}, {"3 months", 90}, {"6 months", 180}, {"year", 365}, {"all", 3660}]
-
-  defp range_label("week"), do: "last 7 days"
-  defp range_label("month"), do: "last 30 days"
-  defp range_label("all"), do: "all time"
-  defp range_label(other), do: "last #{other}"
 end
