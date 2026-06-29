@@ -189,11 +189,11 @@ defmodule LapsusAgent.UI.Layouts do
           .kv dd{margin:0;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;min-width:0}
           .kv dd.mono{font-family:ui-monospace,Menlo,monospace;font-size:.83rem;word-break:break-all}
           .kv .ok{color:#1f9d55}
-          /* updates: a borderless text action so it sits flush with the values above */
-          .updbtn{background:none;border:0;padding:0;margin:0;font:inherit;font-weight:550;color:var(--fg);
-                  cursor:pointer;display:inline-flex;align-items:center;gap:.35rem}
-          .updbtn:hover:not(:disabled){text-decoration:underline}
-          .updbtn:disabled{opacity:.5;cursor:default;text-decoration:none}
+          /* updates: rounded button whose left border edge sits flush with the value column (margin:0) */
+          .updbtn{background:#fff;border:1px solid var(--line);border-radius:9px;padding:.34rem .7rem;margin:0;
+                  font:inherit;font-size:.85rem;color:var(--fg);cursor:pointer;display:inline-flex;align-items:center;gap:.38rem}
+          .updbtn:hover:not(:disabled){border-color:var(--fg)}
+          .updbtn:disabled{opacity:.5;cursor:default}
           .upd-note{color:#9aa1ab;font-size:.85rem}
           /* usage two-column: time chart + model donut, each its own framed panel */
           .usage-grid{display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-top:1rem;align-items:stretch}
