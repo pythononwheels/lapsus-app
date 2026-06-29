@@ -126,6 +126,19 @@ defmodule LapsusAgent.Consumer do
     result
   end
 
+  @doc """
+  This peer's id — loads (or creates) the on-disk identity, independent of whether
+  the provider is currently sharing. For showing the node id in the UI even offline.
+  """
+  @spec peer_id(keyword()) :: String.t()
+  def peer_id(opts \\ []) do
+    identity =
+      opts[:identity] ||
+        Identity.load_or_create!(opts[:identity_path] || default_identity_path())
+
+    identity.peer_id
+  end
+
   # --- internals ---
 
   defp discover_and_ask(coord, identity, model, prompt, req_opts, timeout, min_ctx) do

@@ -3,13 +3,13 @@ defmodule LapsusAgent.UI.DashboardLive do
   use Phoenix.LiveView
   import LapsusAgent.UI.Components
 
-  alias LapsusAgent.{Provider, ProviderControl, Settings}
+  alias LapsusAgent.{Consumer, Provider, ProviderControl, Settings}
   alias LapsusAgent.UI.Charts
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket), do: :timer.send_interval(1500, :tick)
-    {:ok, assign(socket, status: ProviderControl.status(), error: nil, show_settings: false, range: "week", quitting: false)}
+    {:ok, assign(socket, status: ProviderControl.status(), peer_id: Consumer.peer_id(), error: nil, show_settings: false, range: "week", quitting: false)}
   end
 
   @impl true
@@ -98,16 +98,7 @@ defmodule LapsusAgent.UI.DashboardLive do
     assigns = assign(assigns, :locale, if(settings, do: Settings.chart_locale(settings), else: "de-DE"))
 
     ~H"""
-    <nav class="nav">
-      <.brand />
-      <span class="muted" style="font-size:.95rem">Share AI</span>
-      <span class="spacer"></span>
-      <a href="/ask" class="lnk">Use the network →</a>
-      <.quit_button />
-    </nav>
-
-    <div style="height:1.5rem"></div>
-
+    <.app_shell active={:share} peer_id={@peer_id}>
     <div :if={@error} class="card" style="border-color:var(--fg)">{@error}</div>
 
     <div class="card sec" id="sharing-card">
@@ -298,7 +289,7 @@ defmodule LapsusAgent.UI.DashboardLive do
       </div>
     </div>
 
-    <.footer />
+    </.app_shell>
     """
   end
 

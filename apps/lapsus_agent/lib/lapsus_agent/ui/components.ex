@@ -65,6 +65,48 @@ defmodule LapsusAgent.UI.Components do
     """
   end
 
+  attr :active, :atom, default: :home
+  attr :peer_id, :string, default: nil
+  slot :inner_block, required: true
+
+  @doc """
+  The local app's management shell — a top app bar (brand + "running locally" +
+  short peer id + Quit) and a left rail (Home / Share AI / Use AI + the network),
+  wrapping the page content. Makes the local console clearly distinct from the
+  public homepage. The hosting LiveView must handle `"quit"` + `:shutdown`.
+  """
+  def app_shell(assigns) do
+    ~H"""
+    <div class="appbar">
+      <a href="/" class="brand"><.logo size={28} /> LAPSUS</a>
+      <span class="live"><span class="d"></span> Running locally</span>
+      <span style="flex:1"></span>
+      <span :if={@peer_id} class="pid" title={@peer_id}>{short_id(@peer_id)}</span>
+      <.quit_button />
+    </div>
+
+    <div class="shell">
+      <nav class="rail">
+        <a href="/" class={if @active == :home, do: "on"}>⌂ &nbsp; Home</a>
+        <a href="/provider" class={if @active == :share, do: "on"}>↑ &nbsp; Share AI</a>
+        <a href="/ask" class={if @active == :use, do: "on"}>↓ &nbsp; Use AI</a>
+        <div class="grp">Network</div>
+        <a href="https://lapsus.pyrates.io" target="_blank" rel="noopener">◉ &nbsp; lapsus.pyrates.io</a>
+      </nav>
+
+      <main class="main">
+        {render_slot(@inner_block)}
+      </main>
+    </div>
+    """
+  end
+
+  @doc "Shorten a peer id for compact display, keeping head + tail."
+  def short_id(id) when is_binary(id) and byte_size(id) > 22,
+    do: String.slice(id, 0, 12) <> "…" <> String.slice(id, -7, 7)
+
+  def short_id(id), do: id
+
   @doc "The \"shutting down\" screen shown after Quit while the BEAM stops."
   def shutdown_notice(assigns) do
     ~H"""

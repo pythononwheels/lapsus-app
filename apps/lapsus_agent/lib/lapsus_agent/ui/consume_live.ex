@@ -34,7 +34,8 @@ defmodule LapsusAgent.UI.ConsumeLive do
        error: nil,
        usage: nil,
        loading_usage: connected?(socket),
-       quitting: false
+       quitting: false,
+       peer_id: Consumer.peer_id()
      )
      |> allow_upload(:doc, accept: :any, max_entries: 1, max_file_size: 4_000_000)}
   end
@@ -196,16 +197,7 @@ defmodule LapsusAgent.UI.ConsumeLive do
       |> assign(:locale, Settings.chart_locale(assigns.settings))
 
     ~H"""
-    <nav class="nav">
-      <.brand />
-      <span class="muted" style="font-size:.95rem">Use AI</span>
-      <span class="spacer"></span>
-      <a href="/provider" class="lnk">Share your AI →</a>
-      <.quit_button />
-    </nav>
-
-    <div style="height:1.5rem"></div>
-
+    <.app_shell active={:use} peer_id={@peer_id}>
     <div class="tabs">
       <button class={"tab #{if @tab == :ask, do: "on"}"} phx-click="tab" phx-value-tab="ask">Ask</button>
       <button class={"tab #{if @tab == :activity, do: "on"}"} phx-click="tab" phx-value-tab="activity">Activity</button>
@@ -345,7 +337,7 @@ defmodule LapsusAgent.UI.ConsumeLive do
       </div>
     </div>
 
-    <.footer />
+    </.app_shell>
     """
   end
 

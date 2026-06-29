@@ -232,6 +232,27 @@ defmodule LapsusAgent.UI.Layouts do
           /* footer */
           .footer{border-top:1px solid var(--line);margin-top:2.5rem;padding:2rem 0;color:var(--muted);font-size:.85rem;display:flex;gap:1.3rem;flex-wrap:wrap;align-items:center}
           .lock{color:#c2c7ce;display:block;margin:0 auto}
+
+          /* local app shell (management console) — full-bleed out of .wrap */
+          .appbar,.shell{position:relative;width:100vw;left:50%;margin-left:-50vw}
+          .appbar{display:flex;align-items:center;gap:1rem;padding:.65rem 1.2rem;background:#fff;border-bottom:1px solid var(--line)}
+          .appbar .brand{font-weight:750;letter-spacing:.04em;font-size:1.05rem;color:var(--fg);display:inline-flex;align-items:center;gap:.5rem}
+          .appbar .brand img{height:28px;width:28px}
+          .live{display:inline-flex;align-items:center;gap:.4rem;font-size:.8rem;border:1px solid var(--line);border-radius:999px;padding:.18rem .55rem;color:var(--fg)}
+          .live .d{width:.5rem;height:.5rem;border-radius:50%;background:#1f9d55;display:inline-block}
+          .appbar .pid{font-family:ui-monospace,Menlo,monospace;font-size:.76rem;color:var(--muted)}
+          .shell{display:grid;grid-template-columns:208px 1fr;min-height:calc(100vh - 50px);background:var(--soft)}
+          .rail{border-right:1px solid var(--line);background:#fff;padding:1rem .7rem}
+          .rail a{display:flex;align-items:center;padding:.5rem .7rem;border-radius:9px;color:var(--fg);font-size:.92rem;text-decoration:none}
+          .rail a.on{background:var(--fg);color:#fff}
+          .rail a:hover:not(.on){background:var(--soft);text-decoration:none}
+          .rail .grp{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;margin:.9rem .7rem .3rem}
+          .main{padding:1.6rem 1.8rem;min-width:0}
+          .main h1{font-size:1.4rem;margin:0 0 .25rem}
+          .main .sub{color:#475160;margin:0 0 1.3rem;font-size:.92rem}
+          .console{font-family:ui-monospace,Menlo,monospace;font-size:.8rem;color:#57606a;background:#fff;border:1px solid var(--line);border-radius:12px;padding:.8rem 1rem;line-height:1.8;overflow-wrap:anywhere}
+          .console .ok{color:#1f9d55}
+          @media (max-width:760px){.shell{grid-template-columns:1fr}.rail{border-right:0;border-bottom:1px solid var(--line)}}
         </style>
       </head>
       <body>

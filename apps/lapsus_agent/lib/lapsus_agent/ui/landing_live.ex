@@ -1,32 +1,77 @@
 defmodule LapsusAgent.UI.LandingLive do
-  @moduledoc "Home / front door. First run → onboarding; otherwise the Share/Ask hub."
+  @moduledoc "Home — the node overview / management console for this machine."
   use Phoenix.LiveView
   import LapsusAgent.UI.Components
 
-  alias LapsusAgent.Settings
+  alias LapsusAgent.{Consumer, ProviderControl, Settings}
 
   @impl true
   def mount(_params, _session, socket) do
     if Settings.onboarded?() do
-      {:ok, assign(socket, demo: "app", quitting: false)}
+      if connected?(socket) do
+        :timer.send_interval(1500, :tick)
+        send(self(), :load_overview)
+      end
+
+      {:ok,
+       assign(socket,
+         status: ProviderControl.status(),
+         peer_id: Consumer.peer_id(),
+         balance: nil,
+         net_models: nil,
+         error: nil,
+         quitting: false
+       )}
     else
       {:ok, redirect(socket, to: "/welcome")}
     end
   end
 
   @impl true
-  def handle_event("demo", %{"demo" => d}, socket) when d in ["app", "cli"],
-    do: {:noreply, assign(socket, demo: d)}
+  def handle_info(:tick, socket), do: {:noreply, assign(socket, status: ProviderControl.status())}
 
-  def handle_event("quit", _params, socket) do
-    Process.send_after(self(), :shutdown, 500)
-    {:noreply, assign(socket, quitting: true)}
-  end
-
-  @impl true
   def handle_info(:shutdown, socket) do
     System.stop(0)
     {:noreply, socket}
+  end
+
+  # Balance + network model count come from the coordinator, so they're shown even
+  # when sharing is off. Fetched once on connect (the tick keeps local status fresh).
+  def handle_info(:load_overview, socket) do
+    parent = self()
+    Task.start(fn -> send(parent, {:balance, Consumer.usage(1)}) end)
+    Task.start(fn -> send(parent, {:net_models, Consumer.network_models()}) end)
+    {:noreply, socket}
+  end
+
+  def handle_info({:balance, {:ok, %{"balance" => bal}}}, socket), do: {:noreply, assign(socket, balance: bal)}
+  def handle_info({:balance, _}, socket), do: {:noreply, socket}
+  def handle_info({:net_models, {:ok, models}}, socket), do: {:noreply, assign(socket, net_models: length(models))}
+  def handle_info({:net_models, _}, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_event("toggle_sharing", _params, socket) do
+    if ProviderControl.running?() do
+      ProviderControl.stop()
+      {:noreply, assign(socket, status: ProviderControl.status(), error: nil)}
+    else
+      case ProviderControl.start() do
+        {:ok, _} ->
+          {:noreply, assign(socket, status: ProviderControl.status(), error: nil)}
+
+        {:error, {:no_local_engine, _}} ->
+          {:noreply, assign(socket, error: "No local engine found — start Ollama (:11434) or LM Studio (:1234).")}
+
+        {:error, reason} ->
+          {:noreply, assign(socket, error: inspect(reason))}
+      end
+    end
+  end
+
+  def handle_event("quit", _params, socket) do
+    if ProviderControl.running?(), do: ProviderControl.stop()
+    Process.send_after(self(), :shutdown, 500)
+    {:noreply, assign(socket, quitting: true)}
   end
 
   @impl true
@@ -37,92 +82,72 @@ defmodule LapsusAgent.UI.LandingLive do
   end
 
   def render(assigns) do
+    on = assigns.status[:running] == true
+    assigns = assign(assigns, running: on)
+
     ~H"""
-    <nav class="nav">
-      <.brand />
-      <a href="/how" class="lnk">How it works</a>
-      <span class="spacer"></span>
-      <a href="/ask" class="btn btn-secondary">Use AI</a>
-      <a href="/provider" class="btn btn-primary">Share AI</a>
-      <.quit_button />
-    </nav>
+    <.app_shell active={:home} peer_id={@peer_id}>
+      <h1>Node overview</h1>
+      <div class="sub">
+        Your machine on the LAPSUS network — what it shares, uses and earns. Everything here runs locally.
+      </div>
 
-    <section class="hero">
-      <div style="text-align:center;margin-bottom:1.2rem"><.logo size={96} /></div>
-      <div class="eyebrow">Community-powered local AI p2p network</div>
-      <h1 class="motto">Let's run AI.<br />On our own machines.<br />Not Big Tech's cloud.</h1>
-      <p class="lede">Let's build our own decentralized AI p2p network.</p>
-      <div class="cta">
-        <a href="/provider" class="btn btn-primary">Share your AI →</a>
-        <a href="/ask" class="btn btn-secondary">Use the network →</a>
-      </div>
-      <p style="margin-top:1rem"><a href="/how" class="lnk">How it works →</a></p>
-    </section>
+      <div :if={@error} class="card" style="border-color:var(--fg);margin-top:0;margin-bottom:1rem">{@error}</div>
 
-    <div class="intro-lede">
-      <p>
-        Share your idle GPU and offer tokens to the network; use the community's when you need
-        more — prompts go straight, peer to peer. Hard rate limits are built in, so you can offer
-        a text model and tap someone else's image model. Every share earns credits; using the
-        network spends them. <strong>Offer some, get some.</strong>
-      </p>
-    </div>
+      <div class="tiles" style="grid-template-columns:repeat(3,1fr)">
+        <div class="tile">
+          <strong>
+            <span class={"dot #{if @running, do: "on", else: "off"}"}></span>{if @running, do: "Online", else: "Offline"}
+          </strong>
+          <span class="muted">Status</span>
+        </div>
+        <div class="tile"><strong>{tile_val(@running && @status[:balance] || @balance)}</strong><span class="muted">CC balance</span></div>
+        <div class="tile"><strong style="font-size:.98rem">{if @running, do: engine_label(@status[:engine]), else: "—"}</strong><span class="muted">Local engine</span></div>
+        <div class="tile"><strong>{tile_val(@running && @status[:served_today])}</strong><span class="muted">Served today</span></div>
+        <div class="tile"><strong>{tile_val(@running && @status[:earned_today])}</strong><span class="muted">CC earned today</span></div>
+        <div class="tile"><strong>{tile_val(@net_models)}</strong><span class="muted">Models on the network</span></div>
+      </div>
 
-    <div class="howhead" id="how">
-      <span class="eyebrow" style="margin:0">See it in action</span>
-      <div class="pills">
-        <button class={"pill #{if @demo == "app", do: "on"}"} phx-click="demo" phx-value-demo="app">App</button>
-        <button class={"pill #{if @demo == "cli", do: "on"}"} phx-click="demo" phx-value-demo="cli">CLI</button>
+      <div class="card sec">
+        <div class="row">
+          <div>
+            <h3>Sharing</h3>
+            <div class="muted" style="font-size:.88rem;margin-top:.2rem">
+              {if @running, do: "Online — your machine is part of the commons. Switch off to go offline instantly.", else: "Offline — flip on to put this machine to work for the community."}
+            </div>
+          </div>
+          <button class={"sw #{if @running, do: "on"}"} phx-click="toggle_sharing" aria-label="toggle sharing">
+            <span class="knob"></span>
+          </button>
+        </div>
       </div>
-    </div>
 
-    <section class="section">
-      <div>
-        <h2>Share your AI</h2>
-        <p>
-          Already running Ollama or LM Studio? Open the app and your idle GPU joins the commons.
-          You set what to share; close the app and you're instantly out.
-        </p>
-        <p class="muted">Earn credits for every request you serve.</p>
+      <div class="row" style="margin:.4rem 0 1rem;gap:.8rem">
+        <a href="/provider" class="btn btn-primary">Open Share AI →</a>
+        <a href="/ask" class="btn btn-secondary">Open Use AI →</a>
       </div>
-      <div :if={@demo == "app"} class="term shotframe">
-        <div class="bar"><i style="background:#d7dade"></i><i style="background:#d7dade"></i><i style="background:#d7dade"></i></div>
-        <img src="/static/shot-share.png" class="shot" alt="LAPSUS — Share AI screen" />
-      </div>
-      <div :if={@demo == "cli"} class="term">
-        <div class="bar"><i style="background:#d7dade"></i><i style="background:#d7dade"></i><i style="background:#d7dade"></i></div>
-        <div class="body"><span class="you">$ lapsus</span>
-    <span class="dim">[provider]</span> engine=lmstudio · sharing gemma-4-e2b
-    <span class="dim">[provider]</span> online — ready to serve
-    <span class="ok">✓ served gemma-4-e2b · +1177 CC</span></div>
-      </div>
-    </section>
 
-    <section class="section">
-      <div :if={@demo == "app"} class="term shotframe">
-        <div class="bar"><i style="background:#d7dade"></i><i style="background:#d7dade"></i><i style="background:#d7dade"></i></div>
-        <img src="/static/shot-use.png" class="shot" alt="LAPSUS — Use AI screen" />
+      <div class="console">
+        <span class="ok">●</span> connected to lapsus.pyrates.io<br />
+        peer {@peer_id}<br />
+        {console_line(@running, @status)}
       </div>
-      <div :if={@demo == "cli"} class="term">
-        <div class="bar"><i style="background:#d7dade"></i><i style="background:#d7dade"></i><i style="background:#d7dade"></i></div>
-        <div class="body"><span class="you">$ lapsus ask gemma "what is p2p?"</span>
-    <span class="dim">asking the network…</span>
-    Peer-to-peer is a decentralized network where
-    machines share resources directly, no central server.
-    <span class="dim">― 29 in / 287 out · 1177 CC</span></div>
-      </div>
-      <div>
-        <h2>Use the network</h2>
-        <p>
-          Pick a community model, send a prompt, and get the answer back from someone else's machine
-          over a direct encrypted channel. Spend the credits you earned by sharing.
-        </p>
-        <p class="muted">Markdown or JSON output, attach a file, ⌘/Ctrl+Enter to send.</p>
-        <p style="margin-top:.6rem"><strong>Remember: offer some then get some.</strong></p>
-      </div>
-    </section>
-
-    <.footer />
+    </.app_shell>
     """
   end
+
+  defp tile_val(nil), do: "—"
+  defp tile_val(false), do: "—"
+  defp tile_val(n) when is_integer(n), do: num(n)
+  defp tile_val(other), do: to_string(other)
+
+  defp engine_label(:ollama), do: "Ollama"
+  defp engine_label(:openai), do: "LM Studio"
+  defp engine_label(nil), do: "—"
+  defp engine_label(other), do: to_string(other)
+
+  defp console_line(true, status),
+    do: "engine=#{status[:engine]} · #{length(status[:models] || [])} model(s) · sharing on"
+
+  defp console_line(false, _status), do: "sharing off — not serving"
 end
