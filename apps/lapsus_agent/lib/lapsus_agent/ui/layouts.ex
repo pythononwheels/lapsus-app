@@ -183,7 +183,12 @@ defmodule LapsusAgent.UI.Layouts do
           .pill:hover{border-color:var(--fg);color:var(--fg)}
           .pill.on{background:var(--fg);border-color:var(--fg);color:var(--bg)}
           .pill:disabled{opacity:.5;cursor:default}
-          .verrow{display:flex;align-items:center;gap:.7rem;margin-top:.9rem;font-size:.85rem;flex-wrap:wrap}
+          /* aligned key/value list for technical info (Status card) */
+          .kv{display:grid;grid-template-columns:max-content 1fr;gap:.5rem 1.3rem;margin:0;font-size:.9rem;align-items:baseline}
+          .kv dt{color:var(--muted)}
+          .kv dd{margin:0;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;min-width:0}
+          .kv dd.mono{font-family:ui-monospace,Menlo,monospace;font-size:.83rem;word-break:break-all}
+          .kv .ok{color:#1f9d55}
           /* usage two-column: time chart + model donut, each its own framed panel */
           .usage-grid{display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-top:1rem;align-items:stretch}
           @media (max-width:640px){.usage-grid{grid-template-columns:1fr}}

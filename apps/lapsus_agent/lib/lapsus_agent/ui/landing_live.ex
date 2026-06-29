@@ -211,16 +211,25 @@ defmodule LapsusAgent.UI.LandingLive do
 
       <section class="dcard">
         <h3>Status</h3>
-        <div class="console">
-          <span class="ok">●</span> connected to lapsus.pyrates.io<br />
-          peer {@peer_id}<br />
-          {console_line(@running, @status)}
-        </div>
-        <div class="verrow">
-          <span class="muted">Version {LapsusAgent.Version.current()}</span>
-          <button class="pill" phx-click="check_update" disabled={@update == :checking}>Check for updates</button>
-          <span :if={update_status_text(@update) != ""} class="muted">{update_status_text(@update)}</span>
-        </div>
+        <dl class="kv">
+          <dt>Connected to</dt>
+          <dd><span class="ok">●</span> lapsus.pyrates.io</dd>
+
+          <dt>Peer ID</dt>
+          <dd class="mono">{@peer_id}</dd>
+
+          <dt>Engine</dt>
+          <dd>{engine_summary(@running, @status)}</dd>
+
+          <dt>Sharing</dt>
+          <dd>{if @running, do: "On", else: "Off"}</dd>
+
+          <dt>Updates</dt>
+          <dd>
+            <button class="pill" phx-click="check_update" disabled={@update == :checking}>Check for updates</button>
+            <span :if={update_status_text(@update) != ""} class="muted">{update_status_text(@update)}</span>
+          </dd>
+        </dl>
       </section>
     </.app_shell>
     """
@@ -247,10 +256,10 @@ defmodule LapsusAgent.UI.LandingLive do
   defp engine_label(nil), do: "—"
   defp engine_label(other), do: to_string(other)
 
-  defp console_line(true, status),
-    do: "engine=#{status[:engine]} · #{length(status[:models] || [])} model(s) · sharing on"
+  defp engine_summary(true, status),
+    do: "#{engine_label(status[:engine])} · #{length(status[:models] || [])} model(s)"
 
-  defp console_line(false, _status), do: "sharing off — not serving"
+  defp engine_summary(false, _status), do: "—"
 
   # --- usage / charts helpers ---
 
