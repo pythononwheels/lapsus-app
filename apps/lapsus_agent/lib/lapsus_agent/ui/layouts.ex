@@ -254,7 +254,9 @@ defmodule LapsusAgent.UI.Layouts do
           .killswitch{display:inline-flex;align-items:center;gap:.45rem;font-size:.8rem;color:var(--fg)}
           .shell{display:grid;grid-template-columns:208px 1fr;min-height:calc(100vh - 50px);background:var(--soft)}
           .rail{border-right:1px solid var(--line);background:#fff;padding:1rem .7rem;display:flex;flex-direction:column}
-          .railftr{margin-top:auto;padding:.6rem .7rem 0;color:var(--muted);font-size:.72rem;font-family:ui-monospace,Menlo,monospace}
+          .railftr{margin-top:auto;padding:.75rem .7rem .15rem;border-top:1px solid var(--line)}
+          .railftr .rf-brand{font-weight:750;letter-spacing:.05em;font-size:.82rem;color:var(--fg)}
+          .railftr .rf-ver{font-family:ui-monospace,Menlo,monospace;font-size:.72rem;color:var(--muted);margin-top:.12rem}
           .rail a{display:flex;align-items:center;padding:.5rem .7rem;border-radius:9px;color:var(--fg);font-size:.92rem;text-decoration:none}
           .rail a.on{background:var(--fg);color:#fff}
           .rail a:hover:not(.on){background:var(--soft);text-decoration:none}

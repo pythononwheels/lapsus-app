@@ -241,7 +241,7 @@ defmodule LapsusAgent.UI.LandingLive do
   defp update_status_text(:checking), do: "Checking…"
   defp update_status_text(:current), do: "You're up to date ✓"
   defp update_status_text({:update, tag, _url}), do: "Update available — #{tag}"
-  defp update_status_text({:dev, tag, _url}), do: "Dev build · latest is #{tag}"
+  defp update_status_text({:dev, _tag, _url}), do: "Development build"
   defp update_status_text(:dev), do: "Development build"
   defp update_status_text(:unknown), do: "Couldn't reach GitHub"
   defp update_status_text(_), do: ""
