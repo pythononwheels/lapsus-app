@@ -253,10 +253,7 @@ defmodule LapsusAgent.UI.Layouts do
           .appbar .pid{font-family:ui-monospace,Menlo,monospace;font-size:.76rem;color:var(--muted)}
           .killswitch{display:inline-flex;align-items:center;gap:.45rem;font-size:.8rem;color:var(--fg)}
           .shell{display:grid;grid-template-columns:208px 1fr;min-height:calc(100vh - 50px);background:var(--soft)}
-          .rail{border-right:1px solid var(--line);background:#fff;padding:1rem .7rem;display:flex;flex-direction:column}
-          .railftr{margin-top:auto;padding:.75rem .7rem .15rem;border-top:1px solid var(--line)}
-          .railftr .rf-brand{font-weight:750;letter-spacing:.05em;font-size:.82rem;color:var(--fg)}
-          .railftr .rf-ver{font-family:ui-monospace,Menlo,monospace;font-size:.72rem;color:var(--muted);margin-top:.12rem}
+          .rail{border-right:1px solid var(--line);background:#fff;padding:1rem .7rem}
           .rail a{display:flex;align-items:center;padding:.5rem .7rem;border-radius:9px;color:var(--fg);font-size:.92rem;text-decoration:none}
           .rail a.on{background:var(--fg);color:#fff}
           .rail a:hover:not(.on){background:var(--soft);text-decoration:none}
@@ -274,6 +271,9 @@ defmodule LapsusAgent.UI.Layouts do
           .dcard.update .btn{margin-left:auto;flex:none}
           .dcard h3{font-size:1.05rem;margin:0}
           .dcard > h3{margin-bottom:.9rem}
+          .dcard-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:.9rem}
+          .dcard-head h3{font-size:1.05rem;margin:0}
+          .ver-badge{font-family:ui-monospace,Menlo,monospace;font-size:.74rem;color:var(--muted);flex:none}
           .dcard .tile{background:var(--soft);border-color:transparent}
           .dcard .panel{background:var(--soft);border-color:transparent}
           .console{font-family:ui-monospace,Menlo,monospace;font-size:.8rem;color:#57606a;line-height:1.8;overflow-wrap:anywhere}

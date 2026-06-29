@@ -210,7 +210,10 @@ defmodule LapsusAgent.UI.LandingLive do
       </section>
 
       <section class="dcard">
-        <h3>Status</h3>
+        <div class="dcard-head">
+          <h3>Status</h3>
+          <span class="ver-badge">{LapsusAgent.Version.current()}</span>
+        </div>
         <dl class="kv">
           <dt>Connected to</dt>
           <dd><span class="ok">●</span> lapsus.pyrates.io</dd>

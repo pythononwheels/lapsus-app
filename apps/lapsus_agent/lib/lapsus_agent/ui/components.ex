@@ -100,10 +100,6 @@ defmodule LapsusAgent.UI.Components do
         <a href="/ask" class={if @active == :use, do: "on"}>↓ &nbsp; Use AI</a>
         <div class="grp">Network</div>
         <a href="https://lapsus.pyrates.io" target="_blank" rel="noopener">◉ &nbsp; lapsus.pyrates.io</a>
-        <div class="railftr">
-          <div class="rf-brand">LAPSUS</div>
-          <div class="rf-ver">{LapsusAgent.Version.current()}</div>
-        </div>
       </nav>
 
       <main class="main">
