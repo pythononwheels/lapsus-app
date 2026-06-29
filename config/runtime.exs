@@ -1,5 +1,16 @@
 import Config
 
+# Override the agent's ICE/STUN servers without a rebuild, e.g. to point at our
+# own coturn later: LAPSUS_STUN_URLS="stun:lapsus.pyrates.io:3478,stun:..."
+if urls = System.get_env("LAPSUS_STUN_URLS") do
+  ice =
+    urls
+    |> String.split(",", trim: true)
+    |> Enum.map(&%{urls: String.trim(&1)})
+
+  config :lapsus_agent, :ice_servers, ice
+end
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration

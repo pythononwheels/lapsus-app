@@ -22,7 +22,9 @@ defmodule LapsusAgent.Peer.Session do
     * `:remote_peer_id` — the other peer's id (required).
     * `:handler` — pid for lifecycle/data messages (default: caller).
     * `:offer` — the remote offer (JSON map), required for `:answerer`.
-    * `:ice_servers` — defaults to `[]` (host candidates; fine on localhost/LAN).
+    * `:ice_servers` — defaults to the configured STUN servers (so NAT hole-punching
+      works across the internet, not just on a LAN). Override per call, or globally
+      via `config :lapsus_agent, :ice_servers` / the `LAPSUS_STUN_URLS` env var.
     * `:label` — DataChannel label (default `"lapsus"`).
   """
   use GenServer
@@ -31,6 +33,16 @@ defmodule LapsusAgent.Peer.Session do
 
   alias ExWebRTC.{ICECandidate, PeerConnection, SessionDescription}
   alias LapsusAgent.Coordinator
+
+  # Public STUN fallback (Google + Cloudflare) — only address discovery, no traffic
+  # flows through them. Lets ICE gather server-reflexive candidates for NAT hole
+  # punching, so two peers behind home routers connect directly. Override globally
+  # with `config :lapsus_agent, :ice_servers` or `LAPSUS_STUN_URLS` (e.g. once we run
+  # our own coturn). No TURN yet — hard NATs simply won't connect until then.
+  @default_stun [
+    %{urls: "stun:stun.l.google.com:19302"},
+    %{urls: "stun:stun.cloudflare.com:3478"}
+  ]
 
   # --- public API ---
 
@@ -52,7 +64,7 @@ defmodule LapsusAgent.Peer.Session do
       remote: Keyword.fetch!(opts, :remote_peer_id),
       handler: Keyword.get(opts, :handler, self()),
       label: Keyword.get(opts, :label, "lapsus"),
-      ice_servers: Keyword.get(opts, :ice_servers, []),
+      ice_servers: Keyword.get(opts, :ice_servers, default_ice_servers()),
       channel_ref: nil
     }
 
@@ -139,4 +151,6 @@ defmodule LapsusAgent.Peer.Session do
   end
 
   defp notify(state, msg), do: send(state.handler, msg)
+
+  defp default_ice_servers, do: Application.get_env(:lapsus_agent, :ice_servers, @default_stun)
 end
