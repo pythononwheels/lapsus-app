@@ -185,7 +185,7 @@ defmodule LapsusAgent.UI.Layouts do
           /* usage two-column: time chart + model donut, each its own framed panel */
           .usage-grid{display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-top:1rem;align-items:stretch}
           @media (max-width:640px){.usage-grid{grid-template-columns:1fr}}
-          .panel{border:1px solid var(--line);border-radius:12px;padding:.85rem .95rem .7rem;background:var(--bg)}
+          .panel{border:1px solid var(--line);border-radius:12px;padding:.85rem .95rem .7rem;background:var(--bg);min-width:0}
           .panel h4{margin:0 0 .5rem;font-size:.82rem;font-weight:600;color:var(--fg)}
           .panel h4 .muted{font-weight:400}
           /* Chart.js canvas containers (sized; chart fills) */
@@ -255,7 +255,7 @@ defmodule LapsusAgent.UI.Layouts do
           .main{padding:1.6rem 1.9rem;min-width:0;background:#fff}
           .main h1{font-size:1.4rem;margin:0 0 .25rem}
           .main .sub{color:#475160;margin:0 0 1.4rem;font-size:.92rem}
-          .dcard{background:#fff;border:1px solid var(--fg);border-radius:14px;padding:1.2rem 1.4rem;margin:0 0 1.2rem}
+          .dcard{background:#fff;border:1px solid rgba(22,24,29,.4);border-radius:14px;padding:1.2rem 1.4rem;margin:0 0 1.2rem;overflow:hidden}
           .dcard:last-child{margin-bottom:0}
           .dcard h3{font-size:1.05rem;margin:0}
           .dcard > h3{margin-bottom:.9rem}
