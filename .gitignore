@@ -39,3 +39,6 @@ node_modules/
 
 # Built app bundles
 /dist/
+
+# release version baked in by CI (absent = "dev")
+apps/lapsus_agent/priv/VERSION

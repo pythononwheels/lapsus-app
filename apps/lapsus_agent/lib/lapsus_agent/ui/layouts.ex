@@ -246,7 +246,8 @@ defmodule LapsusAgent.UI.Layouts do
           .appbar .pid{font-family:ui-monospace,Menlo,monospace;font-size:.76rem;color:var(--muted)}
           .killswitch{display:inline-flex;align-items:center;gap:.45rem;font-size:.8rem;color:var(--fg)}
           .shell{display:grid;grid-template-columns:208px 1fr;min-height:calc(100vh - 50px);background:var(--soft)}
-          .rail{border-right:1px solid var(--line);background:#fff;padding:1rem .7rem}
+          .rail{border-right:1px solid var(--line);background:#fff;padding:1rem .7rem;display:flex;flex-direction:column}
+          .railftr{margin-top:auto;padding:.6rem .7rem 0;color:var(--muted);font-size:.72rem;font-family:ui-monospace,Menlo,monospace}
           .rail a{display:flex;align-items:center;padding:.5rem .7rem;border-radius:9px;color:var(--fg);font-size:.92rem;text-decoration:none}
           .rail a.on{background:var(--fg);color:#fff}
           .rail a:hover:not(.on){background:var(--soft);text-decoration:none}
@@ -257,6 +258,11 @@ defmodule LapsusAgent.UI.Layouts do
           .main .sub{color:#475160;margin:0 0 1.4rem;font-size:.92rem}
           .dcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:1.2rem 1.4rem;margin:0 0 1.2rem;overflow:hidden;box-shadow:0 1px 3px rgba(20,24,28,.06),0 1px 2px rgba(20,24,28,.04)}
           .dcard:last-child{margin-bottom:0}
+          .dcard.update{display:flex;align-items:center;gap:1rem;border-color:var(--fg);box-shadow:0 1px 3px rgba(20,24,28,.1)}
+          .dcard.update .u-txt{min-width:0}
+          .dcard.update strong{font-size:.98rem}
+          .dcard.update .muted{font-size:.85rem}
+          .dcard.update .btn{margin-left:auto;flex:none}
           .dcard h3{font-size:1.05rem;margin:0}
           .dcard > h3{margin-bottom:.9rem}
           .dcard .tile{background:var(--soft);border-color:transparent}

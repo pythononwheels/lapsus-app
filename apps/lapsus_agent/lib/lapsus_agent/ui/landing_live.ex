@@ -12,6 +12,7 @@ defmodule LapsusAgent.UI.LandingLive do
       if connected?(socket) do
         :timer.send_interval(1500, :tick)
         send(self(), :load_overview)
+        send(self(), :check_update)
       end
 
       {:ok,
@@ -24,7 +25,8 @@ defmodule LapsusAgent.UI.LandingLive do
          usage: nil,
          loading_usage: true,
          error: nil,
-         quitting: false
+         quitting: false,
+         update: nil
        )}
     else
       {:ok, redirect(socket, to: "/welcome")}
@@ -52,6 +54,16 @@ defmodule LapsusAgent.UI.LandingLive do
 
   def handle_info({:net_models, {:ok, models}}, socket), do: {:noreply, assign(socket, net_models: length(models))}
   def handle_info({:net_models, _}, socket), do: {:noreply, socket}
+
+  # Update check runs once on connect; network call lives in a task so it never
+  # blocks the dashboard from rendering.
+  def handle_info(:check_update, socket) do
+    parent = self()
+    Task.start(fn -> send(parent, {:update_result, LapsusAgent.Version.check_update()}) end)
+    {:noreply, socket}
+  end
+
+  def handle_info({:update_result, result}, socket), do: {:noreply, assign(socket, update: result)}
 
   def handle_info({:usage, {:ok, %{"balance" => bal} = usage}}, socket),
     do: {:noreply, assign(socket, usage: usage, balance: bal, loading_usage: false)}
@@ -118,6 +130,14 @@ defmodule LapsusAgent.UI.LandingLive do
       </div>
 
       <div :if={@error} class="dcard" style="border-color:var(--bad)">{@error}</div>
+
+      <div :if={match?({:update, _, _}, @update)} class="dcard update">
+        <div class="u-txt">
+          <strong>Update available — {update_tag(@update)}</strong><br />
+          <span class="muted">You're running {LapsusAgent.Version.current()}. Get the latest in one command.</span>
+        </div>
+        <a class="btn btn-primary" href={update_url(@update)} target="_blank" rel="noopener">Get the update</a>
+      </div>
 
       <section class="dcard">
         <h3>Overview</h3>
@@ -194,6 +214,9 @@ defmodule LapsusAgent.UI.LandingLive do
     </.app_shell>
     """
   end
+
+  defp update_tag({:update, tag, _url}), do: tag
+  defp update_url({:update, _tag, url}), do: url
 
   defp tile_val(nil), do: "—"
   defp tile_val(false), do: "—"

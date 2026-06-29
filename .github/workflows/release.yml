@@ -68,10 +68,15 @@ jobs:
 
       - name: Build release
         shell: bash
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           mix local.hex --force
           mix local.rebar --force
           mix deps.get
+          # Bake the release version (the git tag) into the app so it can show it
+          # and check for updates. Absent this file, the app reports "dev".
+          printf '%s' "$TAG" > apps/lapsus_agent/priv/VERSION
           mix release lapsus --overwrite
 
       - name: Package (macOS .app)
