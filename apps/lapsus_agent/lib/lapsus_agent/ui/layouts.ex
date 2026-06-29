@@ -251,14 +251,17 @@ defmodule LapsusAgent.UI.Layouts do
           .rail a.on{background:var(--fg);color:#fff}
           .rail a:hover:not(.on){background:var(--soft);text-decoration:none}
           .rail .grp{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;margin:.9rem .7rem .3rem}
-          /* the content area is one white surface (a card) floating on the grey shell */
-          .main{margin:1.1rem 1.1rem 1.4rem;padding:1.5rem 1.7rem;min-width:0;background:#fff;border:1px solid var(--line);border-radius:16px}
+          /* console pages: a plain white surface; content grouped into bordered cards */
+          .main{padding:1.6rem 1.9rem;min-width:0;background:#fff}
           .main h1{font-size:1.4rem;margin:0 0 .25rem}
-          .main .sub{color:#475160;margin:0 0 1.3rem;font-size:.92rem}
-          /* inner blocks read as light sections on the white surface (avoid white-on-white) */
-          .main .tile,.main .panel,.main .console{background:var(--soft)}
-          .main .card{background:transparent}
-          .console{font-family:ui-monospace,Menlo,monospace;font-size:.8rem;color:#57606a;border:1px solid var(--line);border-radius:12px;padding:.8rem 1rem;line-height:1.8;overflow-wrap:anywhere}
+          .main .sub{color:#475160;margin:0 0 1.4rem;font-size:.92rem}
+          .dcard{background:#fff;border:1px solid var(--fg);border-radius:14px;padding:1.2rem 1.4rem;margin:0 0 1.2rem}
+          .dcard:last-child{margin-bottom:0}
+          .dcard h3{font-size:1.05rem;margin:0}
+          .dcard > h3{margin-bottom:.9rem}
+          .dcard .tile{background:var(--soft);border-color:transparent}
+          .dcard .panel{background:var(--soft)}
+          .console{font-family:ui-monospace,Menlo,monospace;font-size:.8rem;color:#57606a;line-height:1.8;overflow-wrap:anywhere}
           .console .ok{color:#1f9d55}
           @media (max-width:760px){.shell{grid-template-columns:1fr}.rail{border-right:0;border-bottom:1px solid var(--line)}}
         </style>

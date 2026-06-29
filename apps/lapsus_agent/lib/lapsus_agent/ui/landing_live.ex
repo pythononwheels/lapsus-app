@@ -117,23 +117,26 @@ defmodule LapsusAgent.UI.LandingLive do
         Your machine on the LAPSUS network — what it shares, uses and earns. Everything here runs locally.
       </div>
 
-      <div :if={@error} class="card" style="border-color:var(--fg);margin-top:0;margin-bottom:1rem">{@error}</div>
+      <div :if={@error} class="dcard" style="border-color:var(--bad)">{@error}</div>
 
-      <div class="tiles" style="grid-template-columns:repeat(3,1fr)">
-        <div class="tile">
-          <strong>
-            <span class={"dot #{if @running, do: "on", else: "off"}"}></span>{if @running, do: "Online", else: "Offline"}
-          </strong>
-          <span class="muted">Status</span>
+      <section class="dcard">
+        <h3>Overview</h3>
+        <div class="tiles" style="grid-template-columns:repeat(3,1fr)">
+          <div class="tile">
+            <strong>
+              <span class={"dot #{if @running, do: "on", else: "off"}"}></span>{if @running, do: "Online", else: "Offline"}
+            </strong>
+            <span class="muted">Status</span>
+          </div>
+          <div class="tile"><strong>{tile_val(@running && @status[:balance] || @balance)}</strong><span class="muted">CC balance</span></div>
+          <div class="tile"><strong style="font-size:.98rem">{if @running, do: engine_label(@status[:engine]), else: "—"}</strong><span class="muted">Local engine</span></div>
+          <div class="tile"><strong>{tile_val(@running && @status[:served_today])}</strong><span class="muted">Served today</span></div>
+          <div class="tile"><strong>{tile_val(@running && @status[:earned_today])}</strong><span class="muted">CC earned today</span></div>
+          <div class="tile"><strong>{tile_val(@net_models)}</strong><span class="muted">Models on the network</span></div>
         </div>
-        <div class="tile"><strong>{tile_val(@running && @status[:balance] || @balance)}</strong><span class="muted">CC balance</span></div>
-        <div class="tile"><strong style="font-size:.98rem">{if @running, do: engine_label(@status[:engine]), else: "—"}</strong><span class="muted">Local engine</span></div>
-        <div class="tile"><strong>{tile_val(@running && @status[:served_today])}</strong><span class="muted">Served today</span></div>
-        <div class="tile"><strong>{tile_val(@running && @status[:earned_today])}</strong><span class="muted">CC earned today</span></div>
-        <div class="tile"><strong>{tile_val(@net_models)}</strong><span class="muted">Models on the network</span></div>
-      </div>
+      </section>
 
-      <div class="card sec">
+      <section class="dcard">
         <div class="row">
           <h3>Activity <span class="muted">· {range_label(@range)}</span></h3>
           <div class="pills">
@@ -141,52 +144,53 @@ defmodule LapsusAgent.UI.LandingLive do
                     phx-click="set_range" phx-value-range={label}>{label}</button>
           </div>
         </div>
-        <div class="body">
-          <div class="usage-grid">
-            <section class="panel">
-              <h4>Tokens served over time <span class="muted">· as provider</span></h4>
-              <div class="chartbox" id="dash-prov-bar" phx-hook="Chart"
-                   data-chart={Charts.json(Charts.bar_data(series_days(@usage, "provider"), @locale))}>
-                <canvas></canvas>
-                <span :if={!has_data?(@usage, "provider")} class="nodata">{nodata_label(@loading_usage)}</span>
-              </div>
-            </section>
-            <section class="panel">
-              <h4>Model share <span class="muted">· out tokens</span></h4>
-              <div class="chartbox donut" id="dash-prov-donut" phx-hook="Chart"
-                   data-chart={Charts.json(Charts.donut_data(series_by_model(@usage, "provider"), @locale))}>
-                <canvas></canvas>
-                <span :if={!has_data?(@usage, "provider")} class="nodata">{nodata_label(@loading_usage)}</span>
-              </div>
-            </section>
-          </div>
-
-          <div class="usage-grid">
-            <section class="panel">
-              <h4>Requests over time <span class="muted">· as consumer</span></h4>
-              <div class="chartbox" id="dash-cons-bar" phx-hook="Chart"
-                   data-chart={Charts.json(Charts.bar_data(series_days(@usage, "consumer"), @locale))}>
-                <canvas></canvas>
-                <span :if={!has_data?(@usage, "consumer")} class="nodata">{nodata_label(@loading_usage)}</span>
-              </div>
-            </section>
-            <section class="panel">
-              <h4>By model <span class="muted">· out tokens</span></h4>
-              <div class="chartbox donut" id="dash-cons-donut" phx-hook="Chart"
-                   data-chart={Charts.json(Charts.donut_data(series_by_model(@usage, "consumer"), @locale))}>
-                <canvas></canvas>
-                <span :if={!has_data?(@usage, "consumer")} class="nodata">{nodata_label(@loading_usage)}</span>
-              </div>
-            </section>
-          </div>
+        <div class="usage-grid">
+          <section class="panel">
+            <h4>Tokens served over time <span class="muted">· as provider</span></h4>
+            <div class="chartbox" id="dash-prov-bar" phx-hook="Chart"
+                 data-chart={Charts.json(Charts.bar_data(series_days(@usage, "provider"), @locale))}>
+              <canvas></canvas>
+              <span :if={!has_data?(@usage, "provider")} class="nodata">{nodata_label(@loading_usage)}</span>
+            </div>
+          </section>
+          <section class="panel">
+            <h4>Model share <span class="muted">· out tokens</span></h4>
+            <div class="chartbox donut" id="dash-prov-donut" phx-hook="Chart"
+                 data-chart={Charts.json(Charts.donut_data(series_by_model(@usage, "provider"), @locale))}>
+              <canvas></canvas>
+              <span :if={!has_data?(@usage, "provider")} class="nodata">{nodata_label(@loading_usage)}</span>
+            </div>
+          </section>
         </div>
-      </div>
 
-      <div class="console">
-        <span class="ok">●</span> connected to lapsus.pyrates.io<br />
-        peer {@peer_id}<br />
-        {console_line(@running, @status)}
-      </div>
+        <div class="usage-grid">
+          <section class="panel">
+            <h4>Requests over time <span class="muted">· as consumer</span></h4>
+            <div class="chartbox" id="dash-cons-bar" phx-hook="Chart"
+                 data-chart={Charts.json(Charts.bar_data(series_days(@usage, "consumer"), @locale))}>
+              <canvas></canvas>
+              <span :if={!has_data?(@usage, "consumer")} class="nodata">{nodata_label(@loading_usage)}</span>
+            </div>
+          </section>
+          <section class="panel">
+            <h4>By model <span class="muted">· out tokens</span></h4>
+            <div class="chartbox donut" id="dash-cons-donut" phx-hook="Chart"
+                 data-chart={Charts.json(Charts.donut_data(series_by_model(@usage, "consumer"), @locale))}>
+              <canvas></canvas>
+              <span :if={!has_data?(@usage, "consumer")} class="nodata">{nodata_label(@loading_usage)}</span>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="dcard">
+        <h3>Status</h3>
+        <div class="console">
+          <span class="ok">●</span> connected to lapsus.pyrates.io<br />
+          peer {@peer_id}<br />
+          {console_line(@running, @status)}
+        </div>
+      </section>
     </.app_shell>
     """
   end
