@@ -229,10 +229,10 @@ defmodule LapsusAgent.UI.LandingLive do
 
           <dt>Updates</dt>
           <dd>
-            <button class="pill" phx-click="check_update" disabled={@update == :checking}>
+            <button class="updbtn" phx-click="check_update" disabled={@update == :checking}>
               <span aria-hidden="true">↻</span> Check for updates
             </button>
-            <span :if={update_status_text(@update) != ""} class="muted">{update_status_text(@update)}</span>
+            <span :if={update_status_text(@update) != ""} class="upd-note">{update_status_text(@update)}</span>
           </dd>
         </dl>
       </section>
@@ -243,12 +243,12 @@ defmodule LapsusAgent.UI.LandingLive do
   defp update_tag({:update, tag, _url}), do: tag
   defp update_url({:update, _tag, url}), do: url
 
-  defp update_status_text(:checking), do: "Checking…"
-  defp update_status_text(:current), do: "You're up to date ✓"
-  defp update_status_text({:update, tag, _url}), do: "Update available — #{tag}"
-  defp update_status_text({:dev, _tag, _url}), do: "Development build"
-  defp update_status_text(:dev), do: "Development build"
-  defp update_status_text(:unknown), do: "Couldn't reach GitHub"
+  defp update_status_text(:checking), do: "checking…"
+  defp update_status_text(:current), do: "you're up to date ✓"
+  defp update_status_text({:update, tag, _url}), do: "update available — #{tag}"
+  defp update_status_text({:dev, _tag, _url}), do: "development build"
+  defp update_status_text(:dev), do: "development build"
+  defp update_status_text(:unknown), do: "couldn't reach github"
   defp update_status_text(_), do: ""
 
   defp tile_val(nil), do: "—"

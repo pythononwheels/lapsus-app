@@ -189,8 +189,12 @@ defmodule LapsusAgent.UI.Layouts do
           .kv dd{margin:0;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;min-width:0}
           .kv dd.mono{font-family:ui-monospace,Menlo,monospace;font-size:.83rem;word-break:break-all}
           .kv .ok{color:#1f9d55}
-          /* pull the pill's text back so it left-aligns with the values above (offset its padding+border) */
-          .kv .pill{margin-left:calc(-.6rem - 1px);display:inline-flex;align-items:center;gap:.32rem}
+          /* updates: a borderless text action so it sits flush with the values above */
+          .updbtn{background:none;border:0;padding:0;margin:0;font:inherit;font-weight:550;color:var(--fg);
+                  cursor:pointer;display:inline-flex;align-items:center;gap:.35rem}
+          .updbtn:hover:not(:disabled){text-decoration:underline}
+          .updbtn:disabled{opacity:.5;cursor:default;text-decoration:none}
+          .upd-note{color:#9aa1ab;font-size:.85rem}
           /* usage two-column: time chart + model donut, each its own framed panel */
           .usage-grid{display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-top:1rem;align-items:stretch}
           @media (max-width:640px){.usage-grid{grid-template-columns:1fr}}
