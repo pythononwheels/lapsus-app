@@ -229,7 +229,9 @@ defmodule LapsusAgent.UI.LandingLive do
 
           <dt>Updates</dt>
           <dd>
-            <button class="pill" phx-click="check_update" disabled={@update == :checking}>Check for updates</button>
+            <button class="pill" phx-click="check_update" disabled={@update == :checking}>
+              <span aria-hidden="true">↻</span> Check for updates
+            </button>
             <span :if={update_status_text(@update) != ""} class="muted">{update_status_text(@update)}</span>
           </dd>
         </dl>
