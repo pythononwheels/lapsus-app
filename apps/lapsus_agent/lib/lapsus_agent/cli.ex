@@ -35,6 +35,8 @@ defmodule LapsusAgent.CLI do
     case argv do
       [] -> help()
       [h | _] when h in ["help", "-h", "--help"] -> help()
+      [v | _] when v in ["version", "--version", "-v"] -> cmd_version()
+      [u | _] when u in ["update", "--update"] -> cmd_update()
       ["models" | _] -> cmd_models()
       ["balance" | _] -> cmd_balance()
       ["whoami" | _] -> cmd_balance()
@@ -45,6 +47,47 @@ defmodule LapsusAgent.CLI do
   end
 
   # --- commands ---
+
+  defp cmd_version do
+    IO.puts("lps #{LapsusAgent.Version.current()}")
+
+    case LapsusAgent.Version.check_update() do
+      {:update, tag, _} -> IO.puts(dim("  update available — #{tag}   (run: lps update)"))
+      :current -> IO.puts(dim("  up to date ✓"))
+      {:dev, tag, _} -> IO.puts(dim("  dev build · latest published is #{tag}"))
+      :dev -> IO.puts(dim("  dev build"))
+      _ -> IO.puts(dim("  (couldn't check for updates)"))
+    end
+  end
+
+  defp cmd_update do
+    case LapsusAgent.Version.check_update() do
+      {:update, tag, _} ->
+        IO.puts("Updating to #{tag} …")
+
+        {_, status} =
+          System.cmd("sh", ["-c", "curl -fsSL https://lapsus.pyrates.io/install.sh | sh"],
+            into: IO.stream(:stdio, :line),
+            stderr_to_stdout: true
+          )
+
+        if status == 0,
+          do: IO.puts(dim("\nDone — run `lps version` to confirm.")),
+          else: err("update failed (installer exit #{status}).")
+
+      :current ->
+        IO.puts("Already up to date (#{LapsusAgent.Version.current()}).")
+
+      {:dev, _, _} ->
+        IO.puts("Dev build — nothing to update.")
+
+      :dev ->
+        IO.puts("Dev build — nothing to update.")
+
+      _ ->
+        err("couldn't check for updates (offline or GitHub unreachable).")
+    end
+  end
 
   defp cmd_models do
     case Consumer.network_models() do
@@ -293,6 +336,8 @@ defmodule LapsusAgent.CLI do
       lps ask [<#|model>] "<prompt>" [--max N]
                                           ask — pick by number or name; no model → picker
       lps usage [--days N]                what you used (default 7 days) + per-day bars
+      lps version                         running version + update check
+      lps update                          update to the latest release (in place)
       lps help                            this help
 
     Examples
