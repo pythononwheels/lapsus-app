@@ -1,0 +1,8 @@
+#!/bin/sh
+# LAPSUS consumer CLI launcher.
+# Forwards all args to LapsusAgent.CLI via the release node. Args are NUL-joined
+# and base64-encoded into LPS_ARGV so prompts with spaces/quotes pass cleanly.
+here="$(cd "$(dirname "$0")" && pwd)"
+LPS_ARGV="$(printf '%s\0' "$@" | base64 | tr -d '\n')"
+export LPS_ARGV
+exec "$here/lapsus" eval 'LapsusAgent.CLI.main_from_env()'
