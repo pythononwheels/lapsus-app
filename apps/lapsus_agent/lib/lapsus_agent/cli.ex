@@ -69,7 +69,7 @@ defmodule LapsusAgent.CLI do
   end
 
   defp print_network_home(all, nodes) do
-    IO.puts(hdr_s(net_header(nodes)))
+    section(net_header(nodes))
 
     case all do
       [] ->
@@ -86,7 +86,7 @@ defmodule LapsusAgent.CLI do
   end
 
   defp print_howto do
-    IO.puts(hdr_s("How to use"))
+    section("How to use")
     howto("lps ask 1 \"your prompt\"", "ask a model by number")
     howto("lps models [search]", "browse / search models")
     howto("lps history", "your recent prompts")
@@ -266,12 +266,12 @@ defmodule LapsusAgent.CLI do
 
   # Full `lps models` view — P2P network header + "available models".
   defp render_models([], {:search, q}, nodes) do
-    IO.puts(hdr_s(net_header(nodes)))
+    section(net_header(nodes))
     IO.puts(dim("    no models match \"#{q}\"."))
   end
 
   defp render_models([], _mode, nodes) do
-    IO.puts(hdr_s(net_header(nodes)))
+    section(net_header(nodes))
     IO.puts(dim("    no models online — is a provider sharing?"))
   end
 
@@ -283,7 +283,7 @@ defmodule LapsusAgent.CLI do
         {:search, q} -> "available models matching \"#{q}\" (#{length(models)})"
       end
 
-    IO.puts(hdr_s(net_header(nodes)))
+    section(net_header(nodes))
     IO.puts(dim("    " <> sub <> ":"))
     Enum.each(Enum.with_index(models, 1), fn {m, i} -> IO.puts("      #{i}. #{model_line(m)}") end)
 
@@ -355,14 +355,14 @@ defmodule LapsusAgent.CLI do
   # --- "You" block (usage) ---
 
   defp print_you(nil, days, _src) do
-    IO.puts(hdr_s("Usage stats · last #{days}d"))
+    section("Usage stats · last #{days}d")
     IO.puts(dim("    no data (coordinator unreachable, no cache)"))
   end
 
   defp print_you(u, days, src) do
     ct = get_in(u, ["consumer", "totals"]) || %{}
     suffix = if src == :cached, do: dim(" (cached)"), else: ""
-    IO.puts(hdr_s("Usage stats · last #{days}d") <> suffix)
+    section("Usage stats · last #{days}d", suffix)
     IO.puts("    #{num(ct["jobs"] || 0)} req · #{num(ct["cc"] || 0)} CC   #{spark(get_in(u, ["consumer", "days"]) || [])}")
     print_by_model(get_in(u, ["consumer", "by_model"]) || [])
   end
@@ -532,6 +532,12 @@ defmodule LapsusAgent.CLI do
 
   defp hdr(s), do: IO.puts(IO.ANSI.bright() <> s <> IO.ANSI.reset())
   defp hdr_s(s), do: "  " <> IO.ANSI.bright() <> s <> IO.ANSI.reset()
+
+  # A bold section header with a thin rule under it.
+  defp section(title, suffix \\ "") do
+    IO.puts(hdr_s(title) <> suffix)
+    IO.puts("  " <> dim(String.duplicate("─", 54)))
+  end
   defp dim(s), do: IO.ANSI.faint() <> s <> IO.ANSI.reset()
   defp err(s), do: IO.puts(:stderr, IO.ANSI.red() <> s <> IO.ANSI.reset())
 
