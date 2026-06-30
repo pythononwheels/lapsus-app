@@ -270,10 +270,11 @@ defmodule LapsusAgent.UI.LandingLive do
 
   # Selectable windows for the dashboard charts. {label, days}.
   defp ranges,
-    do: [{"week", 7}, {"month", 30}, {"3 months", 90}, {"6 months", 180}, {"year", 365}, {"all", 3660}]
+    do: [{"today", 1}, {"week", 7}, {"month", 30}, {"3 months", 90}, {"6 months", 180}, {"year", 365}, {"all", 3660}]
 
   defp range_days(range), do: Enum.find_value(ranges(), 7, fn {l, d} -> if l == range, do: d end)
 
+  defp range_label("today"), do: "today"
   defp range_label("week"), do: "last 7 days"
   defp range_label("month"), do: "last 30 days"
   defp range_label("all"), do: "all time"
