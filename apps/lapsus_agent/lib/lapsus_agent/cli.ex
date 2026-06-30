@@ -222,12 +222,18 @@ defmodule LapsusAgent.CLI do
   end
 
   defp cmd_config([]) do
+    ensure_config_file()
     cfg = read_config()
     hdr("Config")
-    IO.puts("  max_tokens   #{cfg["max_tokens"] || dim("(default 800)")}")
+    IO.puts("  max_tokens   #{cfg["max_tokens"] || 800}")
     IO.puts("")
-    IO.puts(dim("  file: #{config_path()}"))
-    IO.puts(dim("  set:  lps config max <N>"))
+    IO.puts(dim("  edit this file directly → #{config_path()}"))
+    IO.puts(dim("  or quick-set         → lps config max <N>"))
+  end
+
+  defp cmd_config(["init" | _]) do
+    write_config(Map.merge(config_template(), Map.drop(read_config(), ["_help"])))
+    IO.puts("Wrote an editable config (all defaults + notes) → #{config_path()}")
   end
 
   defp cmd_config(["max", v | _]) do
@@ -242,7 +248,7 @@ defmodule LapsusAgent.CLI do
   end
 
   defp cmd_config(["max"]), do: IO.puts("max_tokens = #{read_config()["max_tokens"] || "800 (default)"}")
-  defp cmd_config(_), do: err("usage: lps config  |  lps config max <N>")
+  defp cmd_config(_), do: err("usage: lps config  |  lps config init  |  lps config max <N>")
 
   defp cmd_version do
     IO.puts("lps #{Version.current()}")
@@ -524,9 +530,27 @@ defmodule LapsusAgent.CLI do
 
   defp write_config(map) do
     File.mkdir_p(lapsus_dir())
-    File.write(config_path(), Jason.encode!(map))
+    File.write(config_path(), Jason.encode!(map, pretty: true) <> "\n")
   rescue
     _ -> :ok
+  end
+
+  # A full, self-documenting config (all keys at their defaults + a `_help` block),
+  # so the file explains itself when edited by hand. Reader ignores `_help`.
+  defp config_template do
+    %{
+      "_help" => %{
+        "max_tokens" => "default output budget for `lps ask` (a ceiling, not a target; --max overrides per call)"
+      },
+      "max_tokens" => 800
+    }
+  end
+
+  # Make sure an editable config file exists (keeps any values the user already set).
+  defp ensure_config_file do
+    unless File.exists?(config_path()) do
+      write_config(Map.merge(config_template(), Map.drop(read_config(), ["_help"])))
+    end
   end
 
   # Default ask budget: config max_tokens, else 800. --max always overrides.
@@ -671,7 +695,7 @@ defmodule LapsusAgent.CLI do
                                           ask — pick by number/name, or interactive picker
       lps usage [--days N]                what you used + per-day bars
       lps history [N]                     your recent prompts (local)
-      lps config [max <N>]                show / set defaults (e.g. ask budget)
+      lps config [init | max <N>]         show / write / set the editable config file
       lps balance                         peer id + CC balance
       lps version                         running version + update check
       lps update                          update to the latest release (in place)
