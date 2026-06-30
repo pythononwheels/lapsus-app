@@ -444,8 +444,17 @@ defmodule LapsusAgent.Provider do
       "in_tokens" => result.in_tokens,
       "out_tokens" => result.out_tokens,
       "model_weight" => weight,
-      "cc" => Credits.cost(result.in_tokens, result.out_tokens, weight)
+      "cc" => billable_cc(result, weight)
     }
+  end
+
+  # Reasoning tokens count toward `out_tokens` but are the model's internal
+  # "thinking", not the answer — so bill them at the input rate (×a), not the
+  # premium output rate (×b). The consumer pays for the answer, not the monologue.
+  defp billable_cc(result, weight) do
+    reasoning = result[:reasoning_tokens] || 0
+    answer_out = max(result.out_tokens - reasoning, 0)
+    Credits.cost(result.in_tokens + reasoning, answer_out, weight)
   end
 
   # --- helpers ---
