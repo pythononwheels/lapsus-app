@@ -19,7 +19,7 @@ defmodule LapsusAgent.CLI do
   alias LapsusAgent.{Consumer, Version}
 
   @bars ~w(▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
-  @spinner ~w(▖ ▘ ▝ ▗)
+  @spinner ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
   @w 58
 
   @doc "Release launcher entry point — reads argv from the LPS_ARGV env var."

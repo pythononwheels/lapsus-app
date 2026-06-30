@@ -16,7 +16,7 @@ defmodule LapsusAgent.Consumer do
   alias LapsusAgent.Peer.{Protocol, Session}
   alias LapsusCore.{Identity, Receipt}
 
-  @default_timeout 60_000
+  @default_timeout 180_000
 
   @doc """
   Ask `model` the `prompt`. Returns `{:ok, result_map}` or `{:error, reason}`.
@@ -28,7 +28,7 @@ defmodule LapsusAgent.Consumer do
     * `:url` — coordinator (default `ws://localhost:4000`)
     * `:max_tokens`, `:temperature`
     * `:identity` / `:identity_path`
-    * `:timeout` (ms, default 60s)
+    * `:timeout` (ms, default 180s)
   """
   @spec ask(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def ask(model, prompt, opts \\ []) do
