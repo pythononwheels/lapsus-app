@@ -170,7 +170,7 @@ defmodule LapsusAgent.CLI do
       {:ok, res} ->
         answer = res.response || res[:reasoning] || "(empty — raise --max; the model used its budget on reasoning)"
         hdr("\n#{model}")
-        IO.puts(answer)
+        IO.puts(render_md(answer))
         IO.puts("")
         IO.puts(dim("  #{num(res.in_tokens)} in / #{num(res.out_tokens)} out tok · #{billing(res)}"))
 
@@ -564,6 +564,39 @@ defmodule LapsusAgent.CLI do
         IO.write(:stderr, "\r" <> dim("#{frame} #{label}…"))
         spin(task, label, i + 1)
     end
+  end
+
+  # Tiny Markdown → ANSI renderer for chat answers (headings, bold, code, bullets).
+  defp render_md(text) do
+    text
+    |> String.split("\n")
+    |> Enum.map_join("\n", &md_line/1)
+  end
+
+  defp md_line(line) do
+    cond do
+      Regex.match?(~r/^\s*```/, line) ->
+        dim(line)
+
+      Regex.match?(~r/^\s*\#{1,6}\s+/, line) ->
+        IO.ANSI.bright() <> Regex.replace(~r/^\s*\#{1,6}\s+/, line, "") <> IO.ANSI.reset()
+
+      Regex.match?(~r/^\s*(---+|\*\*\*+)\s*$/, line) ->
+        dim(String.duplicate("─", 48))
+
+      match = Regex.run(~r/^(\s*)[-*]\s+(.*)$/, line) ->
+        [_, indent, rest] = match
+        indent <> "• " <> inline_md(rest)
+
+      true ->
+        inline_md(line)
+    end
+  end
+
+  defp inline_md(s) do
+    s
+    |> then(&Regex.replace(~r/\*\*(.+?)\*\*/, &1, fn _, x -> IO.ANSI.bright() <> x <> IO.ANSI.reset() end))
+    |> then(&Regex.replace(~r/`([^`]+)`/, &1, fn _, x -> IO.ANSI.bright() <> x <> IO.ANSI.reset() end))
   end
 
   defp hdr(s), do: IO.puts(IO.ANSI.bright() <> s <> IO.ANSI.reset())
