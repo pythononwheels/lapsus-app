@@ -19,6 +19,7 @@ defmodule LapsusAgent.CLI do
   alias LapsusAgent.{Consumer, Version}
 
   @bars ~w(▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
+  @spinner ~w(▖ ▘ ▝ ▗)
   @w 58
 
   @doc "Release launcher entry point — reads argv from the LPS_ARGV env var."
@@ -160,9 +161,12 @@ defmodule LapsusAgent.CLI do
   end
 
   defp do_ask(model, prompt, max) do
-    IO.puts(dim("asking #{model} (max #{max} tokens)…"))
+    result =
+      with_spinner("asking #{model} (max #{max} tokens)", fn ->
+        Consumer.ask(model, prompt, max_tokens: max)
+      end)
 
-    case Consumer.ask(model, prompt, max_tokens: max) do
+    case result do
       {:ok, res} ->
         answer = res.response || res[:reasoning] || "(empty — raise --max; the model used its budget on reasoning)"
         hdr("\n#{model}")
@@ -533,6 +537,24 @@ defmodule LapsusAgent.CLI do
     case IO.gets(prompt) do
       s when is_binary(s) -> String.trim(s)
       _ -> nil
+    end
+  end
+
+  # Run `fun` while animating a small spinner on stderr; clears the line when done.
+  # stderr keeps stdout (and pipes like `| head`) clean.
+  defp with_spinner(label, fun) do
+    task = Task.async(fun)
+    spin(task, label, 0)
+  end
+
+  defp spin(task, label, i) do
+    case Task.yield(task, 90) do
+      {:ok, result} -> IO.write(:stderr, "\r\e[K"); result
+      {:exit, reason} -> IO.write(:stderr, "\r\e[K"); {:error, reason}
+      nil ->
+        frame = Enum.at(@spinner, rem(i, length(@spinner)))
+        IO.write(:stderr, "\r" <> dim("#{frame} #{label}…"))
+        spin(task, label, i + 1)
     end
   end
 
