@@ -396,8 +396,10 @@ defmodule LapsusAgent.Provider do
     Task.start(fn ->
       t0 = System.monotonic_time(:millisecond)
       cons = String.slice(consumer, 0, 12)
+      plog("serve job=#{req.id} model=#{req.model} consumer=#{cons}")
 
-      cond do
+      try do
+        cond do
         not reserve_ok?(coord, consumer, req.id, est_cc) ->
           # Escrow: reserve the estimated cost before spending compute. If the
           # consumer can't afford it, don't serve. The hold clears at submit_receipt
@@ -432,6 +434,16 @@ defmodule LapsusAgent.Provider do
               Session.send_data(session, Protocol.encode_response(req.id, err))
               send(parent, {:job_done, consumer, 0, nil, false})
           end
+        end
+      rescue
+        e ->
+          plog("crashed job=#{req.id} model=#{req.model} consumer=#{cons} error=#{Exception.message(e)} dur=#{System.monotonic_time(:millisecond) - t0}ms")
+          Session.send_data(session, Protocol.encode_response(req.id, {:error, :provider_crashed}))
+          send(parent, {:job_done, consumer, 0, nil, false})
+      catch
+        kind, reason ->
+          plog("crashed job=#{req.id} model=#{req.model} consumer=#{cons} #{kind}=#{inspect(reason)} dur=#{System.monotonic_time(:millisecond) - t0}ms")
+          send(parent, {:job_done, consumer, 0, nil, false})
       end
     end)
   end
