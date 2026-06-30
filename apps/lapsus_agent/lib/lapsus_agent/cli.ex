@@ -57,32 +57,60 @@ defmodule LapsusAgent.CLI do
     pid = Consumer.peer_id()
     {usage, src} = fetch_usage(7)
     bal = (usage && usage["balance"]) || 0
-    all = sorted_models()
+    {models, nodes} = network_data()
 
     box(pid, num(bal) <> " CC")
     IO.puts("")
     print_you(usage, 7, src)
     IO.puts("")
-    print_models_block(all)
+    print_network_home(models, nodes)
     IO.puts("")
-    IO.puts(dim("  ask: lps ask 1 \"…\"   ·   history: lps history   ·   all: lps models   ·   help: lps help"))
+    print_howto()
   end
+
+  defp print_network_home(all, nodes) do
+    IO.puts(hdr_s(net_header(nodes)))
+
+    case all do
+      [] ->
+        IO.puts(dim("    no models online — is a provider sharing?"))
+
+      _ ->
+        shown = Enum.take(all, 5)
+        IO.puts(dim("    available models:"))
+        Enum.each(Enum.with_index(shown, 1), fn {m, i} -> IO.puts("      #{i}. #{model_line(m)}") end)
+
+        if length(all) > length(shown),
+          do: IO.puts(dim("      (+#{length(all) - length(shown)} more · lps models all · lps models <search>)"))
+    end
+  end
+
+  defp print_howto do
+    IO.puts(hdr_s("How to use"))
+    howto("lps ask 1 \"your prompt\"", "ask a model by number")
+    howto("lps models [search]", "browse / search models")
+    howto("lps history", "your recent prompts")
+    howto("lps help", "all commands")
+  end
+
+  defp howto(cmd, desc), do: IO.puts("    " <> String.pad_trailing(cmd, 26) <> dim(desc))
 
   # --- commands ---
 
   defp cmd_models([]) do
-    all = sorted_models()
-    render_models(Enum.take(all, 5), {:top, length(all)})
+    {all, nodes} = network_data()
+    render_models(Enum.take(all, 5), {:top, length(all)}, nodes)
   end
 
   defp cmd_models(["all" | _]) do
-    all = sorted_models()
-    render_models(all, {:all, length(all)})
+    {all, nodes} = network_data()
+    render_models(all, {:all, length(all)}, nodes)
   end
 
   defp cmd_models([q | _]) do
-    matches = sorted_models() |> Enum.filter(&String.contains?(String.downcase(&1["model"]), String.downcase(q)))
-    render_models(matches, {:search, q})
+    {all, nodes} = network_data()
+    matches = Enum.filter(all, &String.contains?(String.downcase(&1["model"]), String.downcase(q)))
+    render_models(matches, {:search, q}, nodes)
   end
 
   defp cmd_balance do
@@ -218,45 +246,50 @@ defmodule LapsusAgent.CLI do
 
   # --- models ---
 
-  defp sorted_models do
-    case Consumer.network_models() do
-      {:ok, models} -> Enum.sort_by(models, &{-(&1["providers"] || 0), -(&1["ctx"] || 0)})
-      _ -> []
+  # One coordinator round-trip → {models sorted by provider count, nodes online}.
+  defp network_data do
+    case Consumer.network() do
+      {:ok, %{"models" => models} = r} ->
+        {Enum.sort_by(models, &{-(&1["providers"] || 0), -(&1["ctx"] || 0)}), r["nodes"]}
+
+      _ ->
+        {[], nil}
     end
   end
 
-  # Compact "top N" block for the home screen (takes the full sorted list).
-  defp print_models_block([]) do
-    IO.puts(hdr_s("Models · top 5 (by providers)"))
-    IO.puts(dim("    none online — is a provider sharing?"))
+  defp sorted_models, do: elem(network_data(), 0)
+
+  defp net_header(nodes) when is_integer(nodes) and nodes > 0,
+    do: "LAPSUS P2P network · #{nodes} #{if nodes == 1, do: "node", else: "nodes"} active"
+
+  defp net_header(_), do: "LAPSUS P2P network"
+
+  # Full `lps models` view — P2P network header + "available models".
+  defp render_models([], {:search, q}, nodes) do
+    IO.puts(hdr_s(net_header(nodes)))
+    IO.puts(dim("    no models match \"#{q}\"."))
   end
 
-  defp print_models_block(all) do
-    shown = Enum.take(all, 5)
-    total = length(all)
-    IO.puts(hdr_s("Models · top #{length(shown)} of #{total} (by providers)"))
-    Enum.each(Enum.with_index(shown, 1), fn {m, i} -> IO.puts("    #{i}. #{model_line(m)}") end)
-    if total > length(shown), do: IO.puts(dim("    (+#{total - length(shown)} more · lps models all · lps models <search>)"))
+  defp render_models([], _mode, nodes) do
+    IO.puts(hdr_s(net_header(nodes)))
+    IO.puts(dim("    no models online — is a provider sharing?"))
   end
 
-  # Full `lps models` view.
-  defp render_models([], {:search, q}), do: IO.puts("No models match \"#{q}\".")
-  defp render_models([], _), do: IO.puts("No models on the network right now — is a provider sharing?")
-
-  defp render_models(models, mode) do
-    label =
+  defp render_models(models, mode, nodes) do
+    sub =
       case mode do
-        {:top, total} -> "Models · top #{length(models)} of #{total} (by providers)"
-        {:all, total} -> "Models · all #{total}"
-        {:search, q} -> "Models matching \"#{q}\" (#{length(models)})"
+        {:top, total} -> "available models · top #{length(models)} of #{total}"
+        {:all, total} -> "available models · all #{total}"
+        {:search, q} -> "available models matching \"#{q}\" (#{length(models)})"
       end
 
-    hdr(label)
-    Enum.each(Enum.with_index(models, 1), fn {m, i} -> IO.puts("  #{i}. #{model_line(m)}") end)
+    IO.puts(hdr_s(net_header(nodes)))
+    IO.puts(dim("    " <> sub <> ":"))
+    Enum.each(Enum.with_index(models, 1), fn {m, i} -> IO.puts("      #{i}. #{model_line(m)}") end)
 
     case mode do
       {:top, total} when total > length(models) ->
-        IO.puts(dim("  (+#{total - length(models)} more · lps models all · lps models <search>)"))
+        IO.puts(dim("      (+#{total - length(models)} more · lps models all · lps models <search>)"))
 
       _ ->
         :ok
@@ -322,14 +355,14 @@ defmodule LapsusAgent.CLI do
   # --- "You" block (usage) ---
 
   defp print_you(nil, days, _src) do
-    IO.puts(hdr_s("You · last #{days}d"))
+    IO.puts(hdr_s("Usage stats · last #{days}d"))
     IO.puts(dim("    no data (coordinator unreachable, no cache)"))
   end
 
   defp print_you(u, days, src) do
     ct = get_in(u, ["consumer", "totals"]) || %{}
     suffix = if src == :cached, do: dim(" (cached)"), else: ""
-    IO.puts(hdr_s("You · last #{days}d") <> suffix)
+    IO.puts(hdr_s("Usage stats · last #{days}d") <> suffix)
     IO.puts("    #{num(ct["jobs"] || 0)} req · #{num(ct["cc"] || 0)} CC   #{spark(get_in(u, ["consumer", "days"]) || [])}")
     print_by_model(get_in(u, ["consumer", "by_model"]) || [])
   end
@@ -442,7 +475,7 @@ defmodule LapsusAgent.CLI do
     inner = @w - 2
     title = " LAPSUS "
     IO.puts("╭─" <> title <> String.duplicate("─", max(0, @w - 3 - String.length(title))) <> "╮")
-    content = pad_lr(short(left), right, inner - 2)
+    content = pad_lr("id  " <> short(left), right, inner - 2)
     IO.puts("│ " <> content <> " │")
     IO.puts("╰" <> String.duplicate("─", inner) <> "╯")
   end

@@ -93,6 +93,36 @@ defmodule LapsusAgent.Consumer do
     result
   end
 
+  @doc """
+  Full network overview — the coordinator's `models` reply as-is:
+  `{:ok, %{"models" => [...], "nodes" => <peers online>}}`.
+  """
+  @spec network(keyword()) :: {:ok, map()} | {:error, term()}
+  def network(opts \\ []) do
+    identity =
+      opts[:identity] ||
+        Identity.load_or_create!(opts[:identity_path] || default_identity_path())
+
+    timeout = opts[:timeout] || @default_timeout
+
+    {:ok, coord} =
+      Coordinator.start_link(
+        identity: identity,
+        url: opts[:url] || Coordinator.default_url(),
+        role: "consumer",
+        handler: self()
+      )
+
+    result =
+      case await_join(timeout) do
+        :ok -> Coordinator.network_models(coord)
+        e -> e
+      end
+
+    safe_stop(coord)
+    result
+  end
+
   @doc "This peer's consumer-side usage (requests sent) over `days`, for the mini-dash."
   @spec usage(pos_integer(), keyword()) :: {:ok, map()} | {:error, term()}
   def usage(days \\ 30, opts \\ []) do
