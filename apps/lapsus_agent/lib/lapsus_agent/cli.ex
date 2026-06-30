@@ -37,6 +37,8 @@ defmodule LapsusAgent.CLI do
   def main(argv) do
     Logger.configure(level: :error)
     {:ok, _} = Application.ensure_all_started(:lapsus_agent)
+    # New installs get an editable base config on their first lps command.
+    ensure_config_file()
 
     case argv do
       [] -> cmd_home()
