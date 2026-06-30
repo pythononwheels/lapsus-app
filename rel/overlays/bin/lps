@@ -2,7 +2,19 @@
 # LAPSUS consumer CLI launcher.
 # Forwards all args to LapsusAgent.CLI via the release node. Args are NUL-joined
 # and base64-encoded into LPS_ARGV so prompts with spaces/quotes pass cleanly.
-here="$(cd "$(dirname "$0")" && pwd)"
+
+# Resolve symlinks (portable, works via ~/.local/bin/lps on Linux & macOS) so we
+# find the release's own `lapsus` binary next to the real script.
+self="$0"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in
+    /*) self="$link" ;;
+    *) self="$(dirname "$self")/$link" ;;
+  esac
+done
+here="$(cd "$(dirname "$self")" && pwd)"
+
 LPS_ARGV="$(printf '%s\0' "$@" | base64 | tr -d '\n')"
 export LPS_ARGV
 exec "$here/lapsus" eval 'LapsusAgent.CLI.main_from_env()'
