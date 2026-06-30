@@ -394,12 +394,16 @@ defmodule LapsusAgent.Provider do
     est_cc = estimate_cc(req, settings, weight)
 
     Task.start(fn ->
+      t0 = System.monotonic_time(:millisecond)
+      cons = String.slice(consumer, 0, 12)
+
       cond do
         not reserve_ok?(coord, consumer, req.id, est_cc) ->
           # Escrow: reserve the estimated cost before spending compute. If the
           # consumer can't afford it, don't serve. The hold clears at submit_receipt
           # (settlement) or via the coordinator's reaper if the job never completes.
-          Logger.info("[provider] refused #{req.model} (#{String.slice(consumer, 0, 12)}…): insufficient_funds")
+          Logger.info("[provider] refused #{req.model} (#{cons}…): insufficient_funds")
+          plog("refused job=#{req.id} model=#{req.model} consumer=#{cons} reason=insufficient_funds")
           Session.send_data(session, Protocol.encode_response(req.id, {:error, :insufficient_funds}))
           send(parent, {:job_done, consumer, 0, nil, false})
 
@@ -414,9 +418,17 @@ defmodule LapsusAgent.Provider do
                 Protocol.encode_response(req.id, {:ok, result}, %{"receipt" => receipt, "provider_sig" => sig})
               )
 
+              plog(
+                "done job=#{req.id} model=#{req.model} consumer=#{cons} " <>
+                  "in=#{result.in_tokens} out=#{result.out_tokens} " <>
+                  "reasoning=#{result[:reasoning_tokens] || 0} cc=#{receipt["cc"]} " <>
+                  "dur=#{System.monotonic_time(:millisecond) - t0}ms"
+              )
+
               send(parent, {:job_done, consumer, result.out_tokens, result.tokens_per_sec, true})
 
-            {:error, _} = err ->
+            {:error, reason} = err ->
+              plog("error job=#{req.id} model=#{req.model} consumer=#{cons} reason=#{inspect(reason)} dur=#{System.monotonic_time(:millisecond) - t0}ms")
               Session.send_data(session, Protocol.encode_response(req.id, err))
               send(parent, {:job_done, consumer, 0, nil, false})
           end
@@ -428,6 +440,7 @@ defmodule LapsusAgent.Provider do
     case Protocol.decode(data) do
       {:request, req} ->
         Logger.info("[provider] rejected #{req.model}: #{reason}")
+        plog("rejected job=#{req.id} model=#{req.model} reason=#{reason}")
         Session.send_data(session, Protocol.encode_response(req.id, {:error, reason}))
 
       _ ->
@@ -455,6 +468,23 @@ defmodule LapsusAgent.Provider do
     reasoning = result[:reasoning_tokens] || 0
     answer_out = max(result.out_tokens - reasoning, 0)
     Credits.cost(result.in_tokens + reasoning, answer_out, weight)
+  end
+
+  # Append one line to the provider activity log (~/.lapsus/provider.log) so a
+  # served/refused/failed job leaves a trace to diagnose later. Best-effort.
+  defp plog(msg) do
+    path = provider_log_path()
+    File.mkdir_p(Path.dirname(path))
+    File.write(path, "#{DateTime.utc_now() |> DateTime.to_iso8601()} #{msg}\n", [:append])
+  rescue
+    _ -> :ok
+  end
+
+  defp provider_log_path do
+    case System.get_env("LAPSUS_IDENTITY") do
+      p when is_binary(p) and p != "" -> Path.join(Path.dirname(p), "provider.log")
+      _ -> Path.join([System.user_home!() || ".", ".lapsus", "provider.log"])
+    end
   end
 
   # --- helpers ---

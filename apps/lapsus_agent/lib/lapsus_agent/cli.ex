@@ -182,13 +182,21 @@ defmodule LapsusAgent.CLI do
         append_history(model, prompt, res)
 
       {:error, :no_provider} ->
-        err("no provider online for #{model} right now.")
+        err("No provider online for #{model} right now — try `lps models`, or again shortly.")
 
       {:error, :insufficient_funds} ->
-        err("insufficient funds — see `lps balance` (lower --max or top up).")
+        err("Not enough credits — see `lps balance` (lower --max or top up).")
+
+      {:error, :timeout} ->
+        err("The provider didn't answer in time. It may be busy or slow — try again, or a smaller --max.")
+
+      {:error, {:provider_error, reason}} ->
+        if String.contains?(to_string(reason), "busy"),
+          do: err("The provider is busy with another request — try again in a moment."),
+          else: err("The provider hit an error: #{reason}")
 
       {:error, e} ->
-        err("ask failed: #{inspect(e)}")
+        err("Ask failed: #{inspect(e)}")
     end
   end
 
