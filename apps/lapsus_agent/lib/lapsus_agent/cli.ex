@@ -47,6 +47,7 @@ defmodule LapsusAgent.CLI do
       [b | _] when b in ["balance", "whoami"] -> cmd_balance()
       ["usage" | rest] -> cmd_usage(rest)
       ["ask" | rest] -> cmd_ask(rest)
+      ["config" | rest] -> cmd_config(rest)
       [h | n] when h in ["history", "last", "log"] -> cmd_history(n)
       [other | _] -> err("unknown command: #{other}\n"); help()
     end
@@ -144,7 +145,7 @@ defmodule LapsusAgent.CLI do
 
   defp cmd_ask(rest) do
     {opts, pos} = split_opts(rest)
-    max = int_opt(opts, "--max", 800)
+    max = int_opt(opts, "--max", default_max())
 
     {model, prompt} =
       case pos do
@@ -219,6 +220,29 @@ defmodule LapsusAgent.CLI do
         end)
     end
   end
+
+  defp cmd_config([]) do
+    cfg = read_config()
+    hdr("Config")
+    IO.puts("  max_tokens   #{cfg["max_tokens"] || dim("(default 800)")}")
+    IO.puts("")
+    IO.puts(dim("  file: #{config_path()}"))
+    IO.puts(dim("  set:  lps config max <N>"))
+  end
+
+  defp cmd_config(["max", v | _]) do
+    case Integer.parse(v) do
+      {n, _} when n > 0 ->
+        write_config(Map.put(read_config(), "max_tokens", n))
+        IO.puts("Default ask budget set to #{num(n)} tokens (override per-call with --max).")
+
+      _ ->
+        err("usage: lps config max <number>")
+    end
+  end
+
+  defp cmd_config(["max"]), do: IO.puts("max_tokens = #{read_config()["max_tokens"] || "800 (default)"}")
+  defp cmd_config(_), do: err("usage: lps config  |  lps config max <N>")
 
   defp cmd_version do
     IO.puts("lps #{Version.current()}")
@@ -485,6 +509,33 @@ defmodule LapsusAgent.CLI do
 
   defp cache_path, do: Path.join(lapsus_dir(), "usage-cache.json")
   defp history_path, do: Path.join(lapsus_dir(), "history.jsonl")
+  defp config_path, do: Path.join(lapsus_dir(), "config.json")
+
+  # --- CLI config (~/.lapsus/config.json) ---
+
+  defp read_config do
+    with {:ok, raw} <- File.read(config_path()),
+         {:ok, map} when is_map(map) <- Jason.decode(raw) do
+      map
+    else
+      _ -> %{}
+    end
+  end
+
+  defp write_config(map) do
+    File.mkdir_p(lapsus_dir())
+    File.write(config_path(), Jason.encode!(map))
+  rescue
+    _ -> :ok
+  end
+
+  # Default ask budget: config max_tokens, else 800. --max always overrides.
+  defp default_max do
+    case read_config()["max_tokens"] do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 800
+    end
+  end
 
   # --- rendering helpers ---
 
@@ -620,6 +671,7 @@ defmodule LapsusAgent.CLI do
                                           ask — pick by number/name, or interactive picker
       lps usage [--days N]                what you used + per-day bars
       lps history [N]                     your recent prompts (local)
+      lps config [max <N>]                show / set defaults (e.g. ask budget)
       lps balance                         peer id + CC balance
       lps version                         running version + update check
       lps update                          update to the latest release (in place)
