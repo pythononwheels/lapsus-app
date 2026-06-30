@@ -306,7 +306,7 @@ defmodule LapsusAgent.UI.Layouts do
                   interaction: { mode: "index", intersect: false },
                   plugins: {
                     legend: { display: true, position: "bottom", labels: { boxWidth: 10, boxHeight: 10, font: { size: 11 }, color: "#6b7280" } },
-                    tooltip: { callbacks: { title: (it) => it[0].label, label: (it) => ` ${it.dataset.label}: ${it.raw.toLocaleString(loc)} tokens` } }
+                    tooltip: { itemSort: (a, b) => b.datasetIndex - a.datasetIndex, callbacks: { title: (it) => it[0].label, label: (it) => ` ${it.dataset.label}: ${it.raw.toLocaleString(loc)} tokens` } }
                   },
                   scales: {
                     x: { stacked: true, grid: { display: false }, ticks: { color: "#6b7280", font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },

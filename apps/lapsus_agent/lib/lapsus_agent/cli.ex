@@ -143,7 +143,7 @@ defmodule LapsusAgent.CLI do
 
   defp cmd_ask(rest) do
     {opts, pos} = split_opts(rest)
-    max = int_opt(opts, "--max", 300)
+    max = int_opt(opts, "--max", 800)
 
     {model, prompt} =
       case pos do
@@ -169,6 +169,12 @@ defmodule LapsusAgent.CLI do
         IO.puts(answer)
         IO.puts("")
         IO.puts(dim("  #{num(res.in_tokens)} in / #{num(res.out_tokens)} out tok · #{billing(res)}"))
+
+        if is_integer(res.out_tokens) and res.out_tokens >= max do
+          IO.puts(dim("  ⚠ hit the #{num(max)}-token cap — answer may be cut. This is a reasoning model"))
+          IO.puts(dim("    (it \"thinks\" before answering); raise it, e.g. --max 1500."))
+        end
+
         append_history(model, prompt, res)
 
       {:error, :no_provider} ->
@@ -559,7 +565,7 @@ defmodule LapsusAgent.CLI do
     Examples
       lps
       lps models gemma
-      lps ask 1 "what is peer-to-peer?" --max 300
+      lps ask 1 "what is peer-to-peer?" --max 1500
     """)
   end
 end
