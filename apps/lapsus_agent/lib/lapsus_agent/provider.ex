@@ -423,7 +423,7 @@ defmodule LapsusAgent.Provider do
               plog(
                 "done job=#{req.id} model=#{req.model} consumer=#{cons} " <>
                   "in=#{result.in_tokens} out=#{result.out_tokens} " <>
-                  "reasoning=#{result[:reasoning_tokens] || 0} cc=#{receipt["cc"]} " <>
+                  "reasoning=#{result.reasoning_tokens || 0} cc=#{receipt["cc"]} " <>
                   "dur=#{System.monotonic_time(:millisecond) - t0}ms"
               )
 
@@ -477,7 +477,7 @@ defmodule LapsusAgent.Provider do
   # "thinking", not the answer — so bill them at the input rate (×a), not the
   # premium output rate (×b). The consumer pays for the answer, not the monologue.
   defp billable_cc(result, weight) do
-    reasoning = result[:reasoning_tokens] || 0
+    reasoning = result.reasoning_tokens || 0
     answer_out = max(result.out_tokens - reasoning, 0)
     Credits.cost(result.in_tokens + reasoning, answer_out, weight)
   end
