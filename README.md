@@ -42,6 +42,44 @@ On Linux you can also grab the tarball directly:
 Both bundle their own runtime and default to the live network. Intel Macs & Windows
 are on the way — see all [releases](https://github.com/pythononwheels/lapsus-app/releases).
 
+## Command line — `lps`
+
+Every install also ships a small CLI, `lps`, for using the network from the terminal:
+
+```bash
+lps                       # home: your balance, recent usage, available models
+lps models [search]       # browse / search models on the network
+lps ask 1 "your prompt"   # ask a model (by number) — answer comes back P2P
+lps usage                 # what you used, last 7 days
+lps history               # your recent prompts (kept locally)
+lps version | lps update  # check / self-update to the latest release
+```
+
+### What gets installed
+
+- **macOS** — the app at `/Applications/LAPSUS.app`; the `lps` CLI lives inside it
+  (`…/Contents/Resources/rel/bin/lps`).
+- **Linux** — the release under `~/.lapsus/lapsus/`; the `lps` CLI at
+  `~/.lapsus/lapsus/bin/lps`.
+- **Your data** lives in `~/.lapsus/` — identity key, settings, a small usage cache
+  and your local prompt history (`history.jsonl`). Nothing is scattered elsewhere.
+
+The installer symlinks `lps` into `~/.local/bin`.
+
+### Putting `lps` on your PATH
+
+If `lps` isn't found, `~/.local/bin` isn't on your `PATH` yet. Either call it by its
+full path (`~/.lapsus/lapsus/bin/lps …`), or add the directory once:
+
+```bash
+# bash / zsh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc   # or ~/.zshrc
+exec $SHELL                                                 # reload the shell
+
+# fish
+fish_add_path ~/.local/bin
+```
+
 ## Run it from source
 
 The app bundles a small web UI it opens in your browser.
