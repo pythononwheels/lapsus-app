@@ -155,6 +155,7 @@ defmodule LapsusAgent.CLI do
     {tools?, rest} = take_flag(rest, ["-t", "--tools"])
     {opts, pos} = split_opts(rest)
     max = int_opt(opts, "--max", default_max())
+    fetch_urls = opts |> all_opts("--fetch") |> Enum.flat_map(&split_csv/1)
 
     {model, prompt} =
       case pos do
@@ -164,18 +165,43 @@ defmodule LapsusAgent.CLI do
       end
 
     cond do
-      model in [nil, ""] -> err("no model selected.")
-      prompt in [nil, ""] -> err("no prompt given.")
-      tools? -> with {:ok, res} <- agent_run(model, prompt, prompt, max), do: append_history(model, prompt, res)
-      true -> do_ask(model, prompt, max)
+      model in [nil, ""] ->
+        err("no model selected.")
+
+      prompt in [nil, ""] ->
+        err("no prompt given.")
+
+      true ->
+        # explicit: prefetch the named URLs and prepend their text as context.
+        seed = if fetch_urls == [], do: prompt, else: fetch_context(fetch_urls) <> "\n\nQuestion: " <> prompt
+
+        if tools?,
+          do: with({:ok, res} <- agent_run(model, prompt, seed, max), do: append_history(model, prompt, res)),
+          else: do_ask(model, prompt, seed, max)
     end
   end
 
-  defp do_ask(model, prompt, max) do
-    case ask_with_spinner(model, prompt, max) do
+  # Fetch each URL up front (explicit `--fetch`), showing per-page status, and build a
+  # context block for the prompt. Unlike `-t`, this doesn't rely on the model asking.
+  defp fetch_context(urls) do
+    body =
+      Enum.map_join(urls, "\n\n", fn url ->
+        IO.puts(margin(dim("⚙ fetch_url · #{truncate(url, 60)}")))
+        text = Tools.fetch_url(url)
+        IO.puts(margin(dim("↳ #{obs_summary(text)}")))
+        "[#{url}]\n#{text}"
+      end)
+
+    "Here are the contents of the pages I fetched:\n\n" <> body
+  end
+
+  # `shown` is echoed in the frame + saved to history (the user's question); `seed` is
+  # what we actually send (may carry prefetched page text prepended to the question).
+  defp do_ask(model, shown, seed, max) do
+    case ask_with_spinner(model, seed, max) do
       {:ok, res} ->
-        print_answer(model, prompt, res, max)
-        append_history(model, prompt, res)
+        print_answer(model, shown, res, max)
+        append_history(model, shown, res)
 
       error ->
         print_ask_error(error, model)
@@ -898,6 +924,16 @@ defmodule LapsusAgent.CLI do
       else: {false, args}
   end
 
+  # All values given for a repeatable `--flag v` option (opts is a flat [f, v, …] list).
+  defp all_opts(opts, flag) do
+    opts
+    |> Enum.chunk_every(2)
+    |> Enum.filter(&match?([^flag, _], &1))
+    |> Enum.map(fn [_, v] -> v end)
+  end
+
+  defp split_csv(s), do: s |> String.split(",", trim: true) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
   defp split_opts(args), do: do_split(args, [], [])
   defp do_split([], opts, pos), do: {Enum.reverse(opts), Enum.reverse(pos)}
   defp do_split(["--" <> _ = f, v | rest], opts, pos), do: do_split(rest, [v, f | opts], pos)
@@ -1043,8 +1079,10 @@ defmodule LapsusAgent.CLI do
 
       lps                                 home: balance · your usage · top models
       lps models [all | <search>]         list models (top 5 by providers, all, or search)
-      lps ask [<#|model>] "<prompt>" [--max N]
+      lps ask [<#|model>] "<prompt>" [--max N] [-t] [--fetch <url,url>]
                                           ask — pick by number/name, or interactive picker
+                                          -t: let the model fetch on its own (implicit)
+                                          --fetch: pre-fetch these URLs as context (explicit)
       lps chat [<#|model>] [--max N]      multi-turn chat (keeps context across turns)
                                           add -t to let the model use tools (web fetch)
       lps tools                           list consumer-side tools (run locally by lps)
@@ -1062,6 +1100,7 @@ defmodule LapsusAgent.CLI do
       lps models gemma
       lps ask 1 "what is peer-to-peer?" --max 1500
       lps ask -t "summarise https://example.com"
+      lps ask --fetch https://a.io,https://b.io "compare the h1 of these pages"
     """)
   end
 end
