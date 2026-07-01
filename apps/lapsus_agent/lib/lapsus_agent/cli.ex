@@ -172,16 +172,20 @@ defmodule LapsusAgent.CLI do
     case result do
       {:ok, res} ->
         answer = res.response || res[:reasoning] || "(empty — raise --max; the model used its budget on reasoning)"
-        hdr("\n#{model}")
-        IO.puts(render_md(answer))
+        w = term_width()
         IO.puts("")
-        IO.puts(dim("  #{num(res.in_tokens)} in / #{num(res.out_tokens)} out tok · #{billing(res)}"))
+        IO.puts(frame_top(model, w))
+        IO.puts(margin(dim("▸ " <> truncate(prompt, w - 6))))
+        IO.puts("")
+        IO.puts(render_md(answer, w))
+        IO.puts("")
+        IO.puts(margin(dim("#{num(res.in_tokens)} in / #{num(res.out_tokens)} out tok · #{billing(res)}")))
 
         if is_integer(res.out_tokens) and res.out_tokens >= max do
-          IO.puts(dim("  ⚠ hit the #{num(max)}-token cap — answer may be cut. This is a reasoning model"))
-          IO.puts(dim("    (it \"thinks\" before answering); raise it, e.g. --max 1500."))
+          IO.puts(margin(dim("⚠ hit the #{num(max)}-token cap — raise --max, e.g. --max 1500.")))
         end
 
+        IO.puts(frame_bottom(w))
         append_history(model, prompt, res)
 
       {:error, :no_provider} ->
@@ -643,38 +647,103 @@ defmodule LapsusAgent.CLI do
     end
   end
 
-  # Tiny Markdown → ANSI renderer for chat answers (headings, bold, code, bullets).
-  defp render_md(text) do
+  # Markdown → ANSI for chat answers: word-wrapped to a readable width, with a
+  # 2-space margin and hanging indents for lists.
+  defp render_md(text, width) do
+    cw = max(width - 4, 24)
+
     text
     |> String.split("\n")
-    |> Enum.map_join("\n", &md_line/1)
+    |> Enum.map_join("\n", &md_line(&1, cw))
   end
 
-  defp md_line(line) do
+  defp md_line(line, cw) do
     cond do
       Regex.match?(~r/^\s*```/, line) ->
-        dim(line)
+        margin(dim(line))
 
       Regex.match?(~r/^\s*\#{1,6}\s+/, line) ->
-        IO.ANSI.bright() <> Regex.replace(~r/^\s*\#{1,6}\s+/, line, "") <> IO.ANSI.reset()
+        line
+        |> then(&Regex.replace(~r/^\s*\#{1,6}\s+/, &1, ""))
+        |> wrap_words(cw)
+        |> Enum.map_join("\n", &margin(IO.ANSI.bright() <> &1 <> IO.ANSI.reset()))
 
       Regex.match?(~r/^\s*(---+|\*\*\*+)\s*$/, line) ->
-        dim(String.duplicate("─", 48))
+        margin(dim(String.duplicate("─", min(cw, 48))))
 
-      match = Regex.run(~r/^(\s*)[-*]\s+(.*)$/, line) ->
-        [_, indent, rest] = match
-        indent <> "• " <> inline_md(rest)
+      m = Regex.run(~r/^(\s*)[-*]\s+(.*)$/, line) ->
+        [_, indent, rest] = m
+        list_item(indent, "• ", inline_md(rest), cw)
+
+      m = Regex.run(~r/^(\s*)(\d+\.)\s+(.*)$/, line) ->
+        [_, indent, num, rest] = m
+        list_item(indent, num <> " ", inline_md(rest), cw)
+
+      String.trim(line) == "" ->
+        ""
 
       true ->
-        inline_md(line)
+        line |> inline_md() |> wrap_words(cw) |> Enum.map_join("\n", &margin/1)
     end
   end
+
+  # A list item with a hanging indent: continuation lines align under the text.
+  defp list_item(indent, marker, text, cw) do
+    avail = max(cw - String.length(indent) - String.length(marker), 12)
+    [first | more] = wrap_words(text, avail)
+    hang = indent <> String.duplicate(" ", String.length(marker))
+
+    ([indent <> marker <> first] ++ Enum.map(more, &(hang <> &1)))
+    |> Enum.map_join("\n", &margin/1)
+  end
+
+  # Word-wrap ANSI-containing text to `width` *visible* columns → list of lines.
+  defp wrap_words(text, width) do
+    {lines, cur} =
+      text
+      |> String.split(~r/\s+/, trim: true)
+      |> Enum.reduce({[], ""}, fn word, {lines, cur} ->
+        cond do
+          cur == "" -> {lines, word}
+          vlen(cur) + 1 + vlen(word) <= width -> {lines, cur <> " " <> word}
+          true -> {[cur | lines], word}
+        end
+      end)
+
+    Enum.reverse([cur | lines])
+  end
+
+  defp vlen(s), do: s |> String.replace(~r/\e\[[0-9;]*m/, "") |> String.length()
 
   defp inline_md(s) do
     s
     |> then(&Regex.replace(~r/\*\*(.+?)\*\*/, &1, fn _, x -> IO.ANSI.bright() <> x <> IO.ANSI.reset() end))
     |> then(&Regex.replace(~r/`([^`]+)`/, &1, fn _, x -> IO.ANSI.bright() <> x <> IO.ANSI.reset() end))
   end
+
+  defp margin(s), do: "  " <> s
+
+  # Terminal width for wrapping (falls back to 80; capped at 92 for readability).
+  defp term_width do
+    case :io.columns() do
+      {:ok, c} -> c |> max(40) |> min(92)
+      _ -> 80
+    end
+  end
+
+  defp frame_top(label, w) do
+    vis = 2 + String.length(label) + 1
+
+    IO.ANSI.faint() <>
+      "─ " <>
+      IO.ANSI.reset() <>
+      IO.ANSI.bright() <>
+      label <>
+      IO.ANSI.reset() <>
+      " " <> IO.ANSI.faint() <> String.duplicate("─", max(w - vis, 0)) <> IO.ANSI.reset()
+  end
+
+  defp frame_bottom(w), do: dim(String.duplicate("─", w))
 
   defp hdr(s), do: IO.puts(IO.ANSI.bright() <> s <> IO.ANSI.reset())
   defp hdr_s(s), do: "  " <> IO.ANSI.bright() <> s <> IO.ANSI.reset()
