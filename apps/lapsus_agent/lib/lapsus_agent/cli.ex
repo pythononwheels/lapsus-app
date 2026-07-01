@@ -17,7 +17,10 @@ defmodule LapsusAgent.CLI do
   history log, both under `~/.lapsus/`.
   """
 
-  alias LapsusAgent.{Consumer, Version}
+  alias LapsusAgent.{Consumer, Tools, Version}
+
+  # Max tool round-trips per ask before we force a final answer (bounds cost + loops).
+  @max_tool_steps 4
 
   @bars ~w(▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
   @spinner ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
@@ -51,6 +54,7 @@ defmodule LapsusAgent.CLI do
       ["usage" | rest] -> cmd_usage(rest)
       ["ask" | rest] -> cmd_ask(rest)
       ["chat" | rest] -> cmd_chat(rest)
+      ["tools" | rest] -> cmd_tools(rest)
       ["config" | rest] -> cmd_config(rest)
       [h | n] when h in ["history", "last", "log"] -> cmd_history(n)
       [other | _] -> err("unknown command: #{other}\n"); help()
@@ -148,6 +152,7 @@ defmodule LapsusAgent.CLI do
   end
 
   defp cmd_ask(rest) do
+    {tools?, rest} = take_flag(rest, ["-t", "--tools"])
     {opts, pos} = split_opts(rest)
     max = int_opt(opts, "--max", default_max())
 
@@ -161,6 +166,7 @@ defmodule LapsusAgent.CLI do
     cond do
       model in [nil, ""] -> err("no model selected.")
       prompt in [nil, ""] -> err("no prompt given.")
+      tools? -> with {:ok, res} <- agent_run(model, prompt, prompt, max), do: append_history(model, prompt, res)
       true -> do_ask(model, prompt, max)
     end
   end
@@ -220,9 +226,116 @@ defmodule LapsusAgent.CLI do
 
   defp print_ask_error({:error, e}, _), do: err("Ask failed: #{inspect(e)}")
 
+  # --- tools (consumer-side ReAct loop; nothing runs on the provider) ---
+
+  defp cmd_tools(_rest) do
+    hdr("Tools — run by lps on your machine, never on a provider")
+    IO.puts("")
+
+    Enum.each(Tools.list(), fn t ->
+      IO.puts("  #{IO.ANSI.bright()}#{t.name}#{IO.ANSI.reset()}  #{dim(t.desc)}")
+    end)
+
+    IO.puts("")
+    IO.puts(dim("  enable per call:  lps ask -t \"summarise https://…\"   ·   lps chat -t"))
+    IO.puts(dim("  the model asks for a tool, lps runs it locally and feeds the result back."))
+  end
+
+  # Drives the ReAct loop and prints the final framed answer. `shown` is echoed in the
+  # frame (the user's line); `seed` seeds the transcript (raw prompt, or chat context).
+  # Returns {:ok, res} on a final answer, :error otherwise.
+  defp agent_run(model, shown, seed, max) do
+    agent_step(model, shown, tool_preamble(seed), max, 0, 0)
+  end
+
+  defp agent_step(model, shown, transcript, max, step, acc_cc) do
+    case ask_with_spinner(model, transcript, max) do
+      {:ok, res} ->
+        text = res.response || ""
+        acc = acc_cc + (res[:cc] || 0)
+
+        case parse_tool_call(text) do
+          {:ok, name, args} when step < @max_tool_steps ->
+            IO.puts(margin(dim("⚙ #{name} · #{arg_summary(args)}")))
+            obs = Tools.run(name, args)
+            IO.puts(margin(dim("↳ #{obs_summary(obs)}")))
+            next = transcript <> "\n" <> text <> "\nRESULT: " <> obs <> "\n\nAssistant:"
+            agent_step(model, shown, next, max, step + 1, acc)
+
+          {:ok, _name, _args} ->
+            # step cap reached — force one final, tool-free answer.
+            forced =
+              transcript <>
+                "\n" <>
+                text <> "\nRESULT: (tool limit reached — answer now with what you have, no TOOL line)\n\nAssistant:"
+
+            agent_final(model, shown, forced, max, acc, step)
+
+          :none ->
+            agent_render(model, shown, res, max, acc, step)
+        end
+
+      error ->
+        print_ask_error(error, model)
+        :error
+    end
+  end
+
+  defp agent_final(model, shown, transcript, max, acc_cc, steps) do
+    case ask_with_spinner(model, transcript, max) do
+      {:ok, res} -> agent_render(model, shown, res, max, acc_cc + (res[:cc] || 0), steps)
+      error -> print_ask_error(error, model); :error
+    end
+  end
+
+  defp agent_render(model, shown, res, max, acc_cc, steps) do
+    print_answer(model, shown, res, max)
+    if steps > 0, do: IO.puts(margin(dim("used #{steps} tool step(s) · #{num(acc_cc)} CC total")))
+    {:ok, res}
+  end
+
+  # Tool instructions live in the *prompt text* (the wire carries no system field), so
+  # the provider stays a plain text function that never knows a tool was offered.
+  defp tool_preamble(seed) do
+    """
+    You can use tools to help answer. Available tools:
+    #{Tools.spec_text()}
+
+    To use a tool, reply with EXACTLY one line and nothing else:
+    TOOL: fetch_url {"url": "https://example.com"}
+    I will run it and reply with: RESULT: <text>. You may call tools multiple times.
+    When you can answer, reply normally in prose with NO TOOL line.
+
+    Question: #{seed}
+
+    Assistant:\
+    """
+  end
+
+  # Find the first `TOOL: <name> {json}` line anywhere in the reply.
+  defp parse_tool_call(text) do
+    case Regex.run(~r/TOOL:\s*([a-z_]+)\s*(\{[^}]*\})/i, text) do
+      [_, name, json] ->
+        case Jason.decode(json) do
+          {:ok, args} when is_map(args) -> {:ok, name, args}
+          _ -> :none
+        end
+
+      _ ->
+        :none
+    end
+  end
+
+  defp arg_summary(%{"url" => url}), do: truncate(url, 60)
+  defp arg_summary(args), do: truncate(inspect(args), 60)
+
+  defp obs_summary("(error:" <> _ = e), do: e
+  defp obs_summary(obs), do: "#{num(String.length(obs))} chars"
+
   # --- chat (a multi-turn REPL; context resent each turn, bounded by config) ---
 
   defp cmd_chat(rest) do
+    {tools?, rest} = take_flag(rest, ["-t", "--tools"])
     {opts, pos} = split_opts(rest)
     max = int_opt(opts, "--max", default_max())
 
@@ -234,39 +347,46 @@ defmodule LapsusAgent.CLI do
 
     cond do
       model in [nil, ""] -> err("no model selected.")
-      true -> start_chat(model, max)
+      true -> start_chat(model, max, tools?)
     end
   end
 
-  defp start_chat(model, max) do
+  defp start_chat(model, max, tools?) do
     w = term_width()
+    label = "chat · #{model}" <> if tools?, do: " · tools", else: ""
     IO.puts("")
-    IO.puts(frame_top("chat · #{model}", w))
+    IO.puts(frame_top(label, w))
     IO.puts(margin(dim("empty line or ‘exit’ to quit · context up to #{num(default_history_tokens())} tok (lps config history <N>)")))
     IO.puts(frame_bottom(w))
-    chat_loop(model, max, new_thread_id(), [])
+    chat_loop(model, max, new_thread_id(), [], tools?)
   end
 
   # turns :: [%{u: user_msg, a: assistant_msg}] in chronological order.
-  defp chat_loop(model, max, thread, turns) do
+  defp chat_loop(model, max, thread, turns, tools?) do
     case read_line("\nyou> ") do
       q when q in [nil, "", "exit", "quit", ":q", "/q"] ->
         IO.puts(dim("  chat ended — saved to your history (lps history)."))
 
       q ->
-        prompt = build_chat_prompt(turns, q)
+        base = build_chat_prompt(turns, q)
+        result = if tools?, do: agent_run(model, q, base, max), else: plain_chat_turn(model, q, base, max)
 
-        case ask_with_spinner(model, prompt, max) do
+        case result do
           {:ok, res} ->
-            print_answer(model, q, res, max)
             append_history(model, q, res, thread)
-            chat_loop(model, max, thread, turns ++ [%{u: q, a: res.response || ""}])
+            chat_loop(model, max, thread, turns ++ [%{u: q, a: res.response || ""}], tools?)
 
-          error ->
-            print_ask_error(error, model)
-            # stay in the chat so a transient error (busy/timeout) can be retried.
-            chat_loop(model, max, thread, turns)
+          # stay in the chat so a transient error (busy/timeout) can be retried.
+          _ ->
+            chat_loop(model, max, thread, turns, tools?)
         end
+    end
+  end
+
+  defp plain_chat_turn(model, shown, prompt, max) do
+    case ask_with_spinner(model, prompt, max) do
+      {:ok, res} -> print_answer(model, shown, res, max); {:ok, res}
+      error -> print_ask_error(error, model); :error
     end
   end
 
@@ -771,6 +891,13 @@ defmodule LapsusAgent.CLI do
     end
   end
 
+  # Pull a boolean flag (any of `names`) out of argv; returns {present?, remaining}.
+  defp take_flag(args, names) do
+    if Enum.any?(args, &(&1 in names)),
+      do: {true, Enum.reject(args, &(&1 in names))},
+      else: {false, args}
+  end
+
   defp split_opts(args), do: do_split(args, [], [])
   defp do_split([], opts, pos), do: {Enum.reverse(opts), Enum.reverse(pos)}
   defp do_split(["--" <> _ = f, v | rest], opts, pos), do: do_split(rest, [v, f | opts], pos)
@@ -919,6 +1046,8 @@ defmodule LapsusAgent.CLI do
       lps ask [<#|model>] "<prompt>" [--max N]
                                           ask — pick by number/name, or interactive picker
       lps chat [<#|model>] [--max N]      multi-turn chat (keeps context across turns)
+                                          add -t to let the model use tools (web fetch)
+      lps tools                           list consumer-side tools (run locally by lps)
       lps usage [--days N]                what you used + per-day bars
       lps history [N]                     your recent prompts (local)
       lps config [max <N> | model <m> | history <N>]
@@ -932,6 +1061,7 @@ defmodule LapsusAgent.CLI do
       lps
       lps models gemma
       lps ask 1 "what is peer-to-peer?" --max 1500
+      lps ask -t "summarise https://example.com"
     """)
   end
 end
