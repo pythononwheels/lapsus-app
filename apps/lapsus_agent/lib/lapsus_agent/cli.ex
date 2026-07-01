@@ -418,7 +418,12 @@ defmodule LapsusAgent.CLI do
 
       input ->
         case Integer.parse(input) do
-          {n, ""} -> Enum.at(list, n - 1)
+          {n, ""} ->
+            case Enum.at(list, n - 1) do
+              %{"model" => name} -> name
+              _ -> err("no model ##{n} in the list."); nil
+            end
+
           _ ->
             filtered = Enum.filter(sorted_models(), &String.contains?(String.downcase(&1["model"]), String.downcase(input)))
             if filtered == [], do: (IO.puts(dim("  no match — showing all")); pick_loop(sorted_models())), else: pick_loop(filtered)
