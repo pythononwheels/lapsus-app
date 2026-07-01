@@ -152,8 +152,8 @@ defmodule LapsusAgent.CLI do
     {model, prompt} =
       case pos do
         [m, p | _] -> {resolve_model(m), p}
-        [p] -> {pick_model(), p}
-        [] -> {pick_model(), read_line("prompt> ")}
+        [p] -> {default_or_pick(), p}
+        [] -> {default_or_pick(), read_line("prompt> ")}
       end
 
     cond do
@@ -231,10 +231,11 @@ defmodule LapsusAgent.CLI do
     ensure_config_file()
     cfg = read_config()
     hdr("Config")
-    IO.puts("  max_tokens   #{cfg["max_tokens"] || 800}")
+    IO.puts("  max_tokens      #{cfg["max_tokens"] || 800}")
+    IO.puts("  default_model   #{model_display(cfg["default_model"])}")
     IO.puts("")
-    IO.puts(dim("  edit this file directly → #{config_path()}"))
-    IO.puts(dim("  or quick-set         → lps config max <N>"))
+    IO.puts(dim("  edit directly → #{config_path()}"))
+    IO.puts(dim("  or: lps config max <N>  ·  lps config model <#|name>"))
   end
 
   defp cmd_config(["init" | _]) do
@@ -254,7 +255,23 @@ defmodule LapsusAgent.CLI do
   end
 
   defp cmd_config(["max"]), do: IO.puts("max_tokens = #{read_config()["max_tokens"] || "800 (default)"}")
-  defp cmd_config(_), do: err("usage: lps config  |  lps config init  |  lps config max <N>")
+
+  defp cmd_config(["model", m | _]) when m in ["none", "clear"] do
+    write_config(Map.put(read_config(), "default_model", ""))
+    IO.puts("Default model cleared — lps ask will show the picker.")
+  end
+
+  defp cmd_config(["model", v | _]) do
+    name = resolve_model(v) || v
+    write_config(Map.put(read_config(), "default_model", name))
+    IO.puts("Default model set to #{name} — lps ask can now skip the picker.")
+  end
+
+  defp cmd_config(["model"]), do: IO.puts("default_model = #{model_display(read_config()["default_model"])}")
+  defp cmd_config(_), do: err("usage: lps config [init | max <N> | model <#|name|none>]")
+
+  defp model_display(m) when is_binary(m) and m != "", do: m
+  defp model_display(_), do: "(none — picker)"
 
   defp cmd_version do
     IO.puts("lps #{Version.current()}")
@@ -368,6 +385,14 @@ defmodule LapsusAgent.CLI do
   defp provider_count(_), do: "1 provider"
 
   # --- interactive picker (number or search) ---
+
+  # Model when none is given on the command line: the config default, else the picker.
+  defp default_or_pick do
+    case read_config()["default_model"] do
+      m when is_binary(m) and m != "" -> m
+      _ -> pick_model()
+    end
+  end
 
   defp pick_model, do: pick_loop(sorted_models())
 
@@ -546,9 +571,11 @@ defmodule LapsusAgent.CLI do
   defp config_template do
     %{
       "_help" => %{
-        "max_tokens" => "default output budget for `lps ask` (a ceiling, not a target; --max overrides per call)"
+        "max_tokens" => "default output budget for `lps ask` (a ceiling, not a target; --max overrides per call)",
+        "default_model" => "model `lps ask` uses when you don't name one (empty = show the picker)"
       },
-      "max_tokens" => 800
+      "max_tokens" => 800,
+      "default_model" => ""
     }
   end
 
@@ -766,7 +793,7 @@ defmodule LapsusAgent.CLI do
                                           ask — pick by number/name, or interactive picker
       lps usage [--days N]                what you used + per-day bars
       lps history [N]                     your recent prompts (local)
-      lps config [init | max <N>]         show / write / set the editable config file
+      lps config [max <N> | model <m>]    show / set defaults (ask budget, default model)
       lps balance                         peer id + CC balance
       lps version                         running version + update check
       lps update                          update to the latest release (in place)
