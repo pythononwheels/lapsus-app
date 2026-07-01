@@ -34,6 +34,17 @@ defmodule LapsusAgent.Peer.Session do
   alias ExWebRTC.{ICECandidate, PeerConnection, SessionDescription}
   alias LapsusAgent.Coordinator
 
+  # App-level chunking. A DataChannel message has an implementation-defined max size
+  # (SCTP/usrsctp fragments up to a ceiling); rather than depend on it, we cap our own
+  # frames. Messages up to @chunk go on the wire **raw** — unchanged, so any client
+  # (old or new) decodes them as before. Larger payloads are split into @chunk pieces,
+  # each carrying a magic header <<0x00, "LPZ", flag>> (flag 1 = more to come, 0 = last).
+  # Our JSON payloads are text and never begin with 0x00, so the receiver tells framed
+  # chunks from raw messages by that first byte alone. Reassembly relies on the
+  # DataChannel being reliable+ordered (SCTP default), so chunks arrive in order.
+  @chunk 16_000
+  @frame_magic "LPZ"
+
   # Public STUN fallback (Google + Cloudflare) — only address discovery, no traffic
   # flows through them. Lets ICE gather server-reflexive candidates for NAT hole
   # punching, so two peers behind home routers connect directly. Override globally
@@ -65,7 +76,9 @@ defmodule LapsusAgent.Peer.Session do
       handler: Keyword.get(opts, :handler, self()),
       label: Keyword.get(opts, :label, "lapsus"),
       ice_servers: Keyword.get(opts, :ice_servers, default_ice_servers()),
-      channel_ref: nil
+      channel_ref: nil,
+      # accumulates chunk payloads (iolist) until a final frame completes the message
+      rx_buffer: []
     }
 
     {:ok, pc} = PeerConnection.start_link(ice_servers: state.ice_servers)
@@ -110,7 +123,7 @@ defmodule LapsusAgent.Peer.Session do
   def handle_cast({:signal, _other}, state), do: {:noreply, state}
 
   def handle_cast({:send_data, data}, %{channel_ref: ref} = state) when not is_nil(ref) do
-    :ok = PeerConnection.send_data(state.pc, ref, data)
+    send_framed(state, ref, data)
     {:noreply, state}
   end
 
@@ -132,6 +145,19 @@ defmodule LapsusAgent.Peer.Session do
     {:noreply, state}
   end
 
+  # a non-final chunk: buffer its payload, wait for more.
+  def handle_info({:ex_webrtc, _pc, {:data, _ref, <<0, @frame_magic, 1, payload::binary>>}}, state) do
+    {:noreply, %{state | rx_buffer: [state.rx_buffer, payload]}}
+  end
+
+  # a final chunk: reassemble the buffered payloads with this one, deliver, reset.
+  def handle_info({:ex_webrtc, _pc, {:data, _ref, <<0, @frame_magic, 0, payload::binary>>}}, state) do
+    message = IO.iodata_to_binary([state.rx_buffer, payload])
+    notify(state, {:peer_data, self(), message})
+    {:noreply, %{state | rx_buffer: []}}
+  end
+
+  # a raw (unframed) message — the common small-payload path, delivered as-is.
   def handle_info({:ex_webrtc, _pc, {:data, _ref, data}}, state) do
     notify(state, {:peer_data, self(), data})
     {:noreply, state}
@@ -151,6 +177,31 @@ defmodule LapsusAgent.Peer.Session do
   end
 
   defp notify(state, msg), do: send(state.handler, msg)
+
+  # Small payloads go raw (backward compatible); large ones are split into framed
+  # chunks. Reliable+ordered SCTP delivers the casts in the order we enqueue them.
+  defp send_framed(state, ref, data) when byte_size(data) <= @chunk do
+    :ok = PeerConnection.send_data(state.pc, ref, data)
+  end
+
+  defp send_framed(state, ref, data) do
+    chunks = chunk_binary(data, @chunk)
+    last = length(chunks) - 1
+
+    chunks
+    |> Enum.with_index()
+    |> Enum.each(fn {payload, i} ->
+      flag = if i == last, do: 0, else: 1
+      :ok = PeerConnection.send_data(state.pc, ref, <<0, @frame_magic, flag, payload::binary>>)
+    end)
+  end
+
+  defp chunk_binary(bin, size) when byte_size(bin) <= size, do: [bin]
+
+  defp chunk_binary(bin, size) do
+    <<head::binary-size(size), rest::binary>> = bin
+    [head | chunk_binary(rest, size)]
+  end
 
   defp default_ice_servers, do: Application.get_env(:lapsus_agent, :ice_servers, @default_stun)
 end
