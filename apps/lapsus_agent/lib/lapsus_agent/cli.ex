@@ -404,6 +404,7 @@ defmodule LapsusAgent.CLI do
   defp pick_loop(list) do
     shown = Enum.take(list, 5)
     IO.puts("")
+    section("Pick a model")
     Enum.each(Enum.with_index(shown, 1), fn {m, i} -> IO.puts("  #{i}. #{model_line(m)}") end)
     if length(list) > 5, do: IO.puts(dim("  (#{length(list)} total — type a word to search)"))
 
