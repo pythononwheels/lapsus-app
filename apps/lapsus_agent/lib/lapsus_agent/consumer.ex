@@ -123,6 +123,45 @@ defmodule LapsusAgent.Consumer do
     result
   end
 
+  @doc "Verified open-source projects that can receive donations (§03)."
+  @spec projects(keyword()) :: {:ok, map()} | {:error, term()}
+  def projects(opts \\ []) do
+    with_coordinator(opts, &Coordinator.list_projects/1)
+  end
+
+  @doc "Donate `cc` credits to a registered project. Returns `{:ok, %{balance: …}}`."
+  @spec donate(String.t(), pos_integer(), keyword()) :: {:ok, map()} | {:error, term()}
+  def donate(project_id, cc, opts \\ []) do
+    with_coordinator(opts, &Coordinator.donate(&1, project_id, cc))
+  end
+
+  # Connect to the coordinator, run `fun.(coord)`, then disconnect. Shared by the
+  # one-shot channel calls (network, projects, donate).
+  defp with_coordinator(opts, fun) do
+    identity =
+      opts[:identity] ||
+        Identity.load_or_create!(opts[:identity_path] || default_identity_path())
+
+    timeout = opts[:timeout] || @default_timeout
+
+    {:ok, coord} =
+      Coordinator.start_link(
+        identity: identity,
+        url: opts[:url] || Coordinator.default_url(),
+        role: "consumer",
+        handler: self()
+      )
+
+    result =
+      case await_join(timeout) do
+        :ok -> fun.(coord)
+        e -> e
+      end
+
+    safe_stop(coord)
+    result
+  end
+
   @doc "This peer's consumer-side usage (requests sent) over `days`, for the mini-dash."
   @spec usage(pos_integer(), keyword()) :: {:ok, map()} | {:error, term()}
   def usage(days \\ 30, opts \\ []) do

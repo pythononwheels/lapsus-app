@@ -70,6 +70,14 @@ defmodule LapsusAgent.Coordinator do
     GenServer.call(server, {:usage, days})
   end
 
+  @doc "Verified open-source projects that can receive donations (§03)."
+  @spec list_projects(GenServer.server()) :: {:ok, map()} | {:error, term()}
+  def list_projects(server \\ __MODULE__), do: GenServer.call(server, :list_projects)
+
+  @doc "Donate `cc` credits to a registered project (authorised by this connection)."
+  @spec donate(GenServer.server(), String.t(), pos_integer()) :: {:ok, map()} | {:error, term()}
+  def donate(server \\ __MODULE__, project_id, cc), do: GenServer.call(server, {:donate, project_id, cc})
+
   @doc "Relay a WebRTC signaling payload to peer `to`."
   @spec signal(GenServer.server(), String.t(), String.t(), term()) :: :ok
   def signal(server \\ __MODULE__, to, kind, data) do
@@ -209,6 +217,16 @@ defmodule LapsusAgent.Coordinator do
 
   def handle_call({:usage, days}, from, socket) do
     {:ok, ref} = push(socket, @lobby, "usage", %{"days" => days})
+    {:noreply, assign(socket, :pending, Map.put(socket.assigns.pending, ref, from))}
+  end
+
+  def handle_call(:list_projects, from, socket) do
+    {:ok, ref} = push(socket, @lobby, "list_projects", %{})
+    {:noreply, assign(socket, :pending, Map.put(socket.assigns.pending, ref, from))}
+  end
+
+  def handle_call({:donate, project_id, cc}, from, socket) do
+    {:ok, ref} = push(socket, @lobby, "donate", %{"project" => project_id, "cc" => cc})
     {:noreply, assign(socket, :pending, Map.put(socket.assigns.pending, ref, from))}
   end
 

@@ -55,6 +55,8 @@ defmodule LapsusAgent.CLI do
       ["ask" | rest] -> cmd_ask(rest)
       ["chat" | rest] -> cmd_chat(rest)
       ["tools" | rest] -> cmd_tools(rest)
+      ["projects" | _] -> cmd_projects()
+      ["donate" | rest] -> cmd_donate(rest)
       ["config" | rest] -> cmd_config(rest)
       [h | n] when h in ["history", "last", "log"] -> cmd_history(n)
       [other | _] -> err("unknown command: #{other}\n"); help()
@@ -467,6 +469,77 @@ defmodule LapsusAgent.CLI do
         end)
     end
   end
+
+  # --- projects & donations (§03) ---
+
+  defp cmd_projects do
+    case Consumer.projects() do
+      {:ok, %{"projects" => []}} ->
+        IO.puts("No registered projects yet — see https://lapsus.pyrates.io/register")
+
+      {:ok, %{"projects" => list}} ->
+        section("Open-source projects · support with  lps donate <#> <cc>")
+
+        list
+        |> Enum.with_index(1)
+        |> Enum.each(fn {p, i} ->
+          IO.puts("  #{i}. #{p["name"]}  #{dim(num(p["balance"] || 0) <> " CC")}")
+          IO.puts("     #{dim(p["repo_url"])}")
+        end)
+
+      {:error, e} ->
+        err("Couldn't fetch projects: #{inspect(e)}")
+    end
+  end
+
+  defp cmd_donate([target, amount | _]) do
+    case Integer.parse(amount) do
+      {cc, _} when cc > 0 -> do_donate(target, cc)
+      _ -> err("usage: lps donate <#|peer_id> <cc-amount>")
+    end
+  end
+
+  defp cmd_donate(_), do: err("usage: lps donate <#|peer_id> <cc-amount>  (see: lps projects)")
+
+  defp do_donate(target, cc) do
+    with {:ok, %{"projects" => list}} <- Consumer.projects(),
+         {:ok, project} <- resolve_project(target, list) do
+      name = project["name"] || project["peer_id"]
+      IO.puts("Donating #{num(cc)} CC to #{IO.ANSI.bright()}#{name}#{IO.ANSI.reset()} …")
+
+      case with_spinner("donating", fn -> Consumer.donate(project["peer_id"], cc) end) do
+        {:ok, %{"balance" => bal}} ->
+          IO.puts(margin(dim("✓ donated #{num(cc)} CC · your balance #{num(bal)} CC · thank you 💚")))
+
+        {:error, reason} ->
+          donate_error(reason)
+      end
+    else
+      {:error, :no_such_project} -> err("no project ##{target} — see `lps projects`.")
+      {:error, e} -> err("donate failed: #{inspect(e)}")
+    end
+  end
+
+  # Resolve a donate target: a number picks from the list, otherwise treat it as a
+  # peer id (looked up for its name, or used as-is if not in the list).
+  defp resolve_project(target, list) do
+    case Integer.parse(target) do
+      {n, ""} ->
+        case Enum.at(list, n - 1) do
+          nil -> {:error, :no_such_project}
+          p -> {:ok, p}
+        end
+
+      _ ->
+        {:ok, Enum.find(list, %{"peer_id" => target, "name" => target}, &(&1["peer_id"] == target))}
+    end
+  end
+
+  defp donate_error(%{"reason" => r}), do: donate_error(r)
+  defp donate_error("insufficient_funds"), do: err("Not enough available credits — see `lps balance`.")
+  defp donate_error("unknown_project"), do: err("That project isn't registered — see `lps projects`.")
+  defp donate_error("self_donation"), do: err("You can't donate to your own account.")
+  defp donate_error(r), do: err("Donation failed: #{r}")
 
   defp cmd_config([]) do
     ensure_config_file()
@@ -1086,6 +1159,8 @@ defmodule LapsusAgent.CLI do
       lps chat [<#|model>] [--max N]      multi-turn chat (keeps context across turns)
                                           add -t to let the model use tools (web fetch)
       lps tools                           list consumer-side tools (run locally by lps)
+      lps projects                        open-source projects you can support (§03)
+      lps donate <#|peer_id> <cc>         donate credits to a registered project
       lps usage [--days N]                what you used + per-day bars
       lps history [N]                     your recent prompts (local)
       lps config [max <N> | model <m> | history <N>]
