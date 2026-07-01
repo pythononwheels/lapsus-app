@@ -50,6 +50,7 @@ Every install also ships a small CLI, `lps`, for using the network from the term
 lps                       # home: your balance, recent usage, available models
 lps models [search]       # browse / search models on the network
 lps ask 1 "your prompt"   # ask a model (by number) — answer comes back P2P
+lps chat 1                # multi-turn chat with a model — context kept across turns
 lps usage                 # what you used, last 7 days
 lps history               # your recent prompts (kept locally)
 lps config max 1500       # set a default ask budget (so you can skip --max)

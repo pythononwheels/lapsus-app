@@ -5,6 +5,7 @@ defmodule LapsusAgent.CLI do
       lps                 home: balance, your recent usage, top models
       lps models [all|<q>] list network models (top 5, all, or search)
       lps ask [<#|model>] "<prompt>" [--max N]
+      lps chat [<#|model>] multi-turn chat (context kept across turns)
       lps usage [--days N] what you used + per-day bars
       lps history [N]      your recent prompts (local, ~/.lapsus/history.jsonl)
       lps balance | version | update | help
@@ -49,6 +50,7 @@ defmodule LapsusAgent.CLI do
       [b | _] when b in ["balance", "whoami"] -> cmd_balance()
       ["usage" | rest] -> cmd_usage(rest)
       ["ask" | rest] -> cmd_ask(rest)
+      ["chat" | rest] -> cmd_chat(rest)
       ["config" | rest] -> cmd_config(rest)
       [h | n] when h in ["history", "last", "log"] -> cmd_history(n)
       [other | _] -> err("unknown command: #{other}\n"); help()
@@ -164,48 +166,141 @@ defmodule LapsusAgent.CLI do
   end
 
   defp do_ask(model, prompt, max) do
-    result =
-      with_spinner("asking #{model} (max #{max} tokens)", fn ->
-        Consumer.ask(model, prompt, max_tokens: max)
-      end)
-
-    case result do
+    case ask_with_spinner(model, prompt, max) do
       {:ok, res} ->
-        answer = res.response || res[:reasoning] || "(empty — raise --max; the model used its budget on reasoning)"
-        w = term_width()
-        IO.puts("")
-        IO.puts(frame_top(model, w))
-        IO.puts(margin(dim("▸ " <> truncate(prompt, w - 6))))
-        IO.puts("")
-        IO.puts(render_md(answer, w))
-        IO.puts("")
-        IO.puts(margin(dim("#{num(res.in_tokens)} in / #{num(res.out_tokens)} out tok · #{billing(res)}")))
-
-        if is_integer(res.out_tokens) and res.out_tokens >= max do
-          IO.puts(margin(dim("⚠ hit the #{num(max)}-token cap — raise --max, e.g. --max 1500.")))
-        end
-
-        IO.puts(frame_bottom(w))
+        print_answer(model, prompt, res, max)
         append_history(model, prompt, res)
 
-      {:error, :no_provider} ->
-        err("No provider online for #{model} right now — try `lps models`, or again shortly.")
-
-      {:error, :insufficient_funds} ->
-        err("Not enough credits — see `lps balance` (lower --max or top up).")
-
-      {:error, :timeout} ->
-        err("The provider didn't answer in time. It may be busy or slow — try again, or a smaller --max.")
-
-      {:error, {:provider_error, reason}} ->
-        if String.contains?(to_string(reason), "busy"),
-          do: err("The provider is busy with another request — try again in a moment."),
-          else: err("The provider hit an error: #{reason}")
-
-      {:error, e} ->
-        err("Ask failed: #{inspect(e)}")
+      error ->
+        print_ask_error(error, model)
     end
   end
+
+  # Shared by `ask` and `chat`: run the request behind a spinner.
+  defp ask_with_spinner(model, prompt, max) do
+    with_spinner("asking #{model} (max #{max} tokens)", fn ->
+      Consumer.ask(model, prompt, max_tokens: max)
+    end)
+  end
+
+  # Shared framed render of one answer. `shown_prompt` is what we echo in the header
+  # (the user's actual message — in chat we send a larger flattened transcript).
+  defp print_answer(model, shown_prompt, res, max) do
+    answer = res.response || res[:reasoning] || "(empty — raise --max; the model used its budget on reasoning)"
+    w = term_width()
+    IO.puts("")
+    IO.puts(frame_top(model, w))
+    IO.puts(margin(dim("▸ " <> truncate(shown_prompt, w - 6))))
+    IO.puts("")
+    IO.puts(render_md(answer, w))
+    IO.puts("")
+    IO.puts(margin(dim("#{num(res.in_tokens)} in / #{num(res.out_tokens)} out tok · #{billing(res)}")))
+
+    if is_integer(res.out_tokens) and res.out_tokens >= max do
+      IO.puts(margin(dim("⚠ hit the #{num(max)}-token cap — raise --max, e.g. --max 1500.")))
+    end
+
+    IO.puts(frame_bottom(w))
+  end
+
+  defp print_ask_error({:error, :no_provider}, model),
+    do: err("No provider online for #{model} right now — try `lps models`, or again shortly.")
+
+  defp print_ask_error({:error, :insufficient_funds}, _),
+    do: err("Not enough credits — see `lps balance` (lower --max or top up).")
+
+  defp print_ask_error({:error, :timeout}, _),
+    do: err("The provider didn't answer in time. It may be busy or slow — try again, or a smaller --max.")
+
+  defp print_ask_error({:error, {:provider_error, reason}}, _) do
+    if String.contains?(to_string(reason), "busy"),
+      do: err("The provider is busy with another request — try again in a moment."),
+      else: err("The provider hit an error: #{reason}")
+  end
+
+  defp print_ask_error({:error, e}, _), do: err("Ask failed: #{inspect(e)}")
+
+  # --- chat (a multi-turn REPL; context resent each turn, bounded by config) ---
+
+  defp cmd_chat(rest) do
+    {opts, pos} = split_opts(rest)
+    max = int_opt(opts, "--max", default_max())
+
+    model =
+      case pos do
+        [m | _] -> resolve_model(m)
+        [] -> default_or_pick()
+      end
+
+    cond do
+      model in [nil, ""] -> err("no model selected.")
+      true -> start_chat(model, max)
+    end
+  end
+
+  defp start_chat(model, max) do
+    w = term_width()
+    IO.puts("")
+    IO.puts(frame_top("chat · #{model}", w))
+    IO.puts(margin(dim("empty line or ‘exit’ to quit · context up to #{num(default_history_tokens())} tok (lps config history <N>)")))
+    IO.puts(frame_bottom(w))
+    chat_loop(model, max, new_thread_id(), [])
+  end
+
+  # turns :: [%{u: user_msg, a: assistant_msg}] in chronological order.
+  defp chat_loop(model, max, thread, turns) do
+    case read_line("\nyou> ") do
+      q when q in [nil, "", "exit", "quit", ":q", "/q"] ->
+        IO.puts(dim("  chat ended — saved to your history (lps history)."))
+
+      q ->
+        prompt = build_chat_prompt(turns, q)
+
+        case ask_with_spinner(model, prompt, max) do
+          {:ok, res} ->
+            print_answer(model, q, res, max)
+            append_history(model, q, res, thread)
+            chat_loop(model, max, thread, turns ++ [%{u: q, a: res.response || ""}])
+
+          error ->
+            print_ask_error(error, model)
+            # stay in the chat so a transient error (busy/timeout) can be retried.
+            chat_loop(model, max, thread, turns)
+        end
+    end
+  end
+
+  # First message → send it verbatim (identical to a plain `lps ask`). Once there's
+  # history, prepend a transcript of the most recent turns that fit the token budget.
+  defp build_chat_prompt([], q), do: q
+
+  defp build_chat_prompt(turns, q) do
+    included = take_within_budget(Enum.reverse(turns), default_history_tokens(), [], 0)
+
+    transcript =
+      included
+      |> Enum.map_join("\n\n", fn %{u: u, a: a} -> "User: #{u}\nAssistant: #{a}" end)
+
+    transcript <> "\n\nUser: #{q}\nAssistant:"
+  end
+
+  # Walk turns newest→oldest, keep them while the running estimate fits the budget;
+  # always keep at least the most recent turn. Returns oldest→newest.
+  defp take_within_budget([], _budget, acc, _sum), do: acc
+
+  defp take_within_budget([turn | rest], budget, acc, sum) do
+    cost = est_tokens(turn.u) + est_tokens(turn.a)
+
+    if sum + cost > budget and acc != [],
+      do: acc,
+      else: take_within_budget(rest, budget, [turn | acc], sum + cost)
+  end
+
+  # Cheap token proxy — no local tokenizer; ~4 bytes/token is close enough to budget.
+  defp est_tokens(s) when is_binary(s), do: div(byte_size(s), 4)
+  defp est_tokens(_), do: 0
+
+  defp new_thread_id, do: "t" <> Integer.to_string(System.system_time(:second))
 
   defp cmd_history(args) do
     n = case args do
@@ -231,11 +326,12 @@ defmodule LapsusAgent.CLI do
     ensure_config_file()
     cfg = read_config()
     hdr("Config")
-    IO.puts("  max_tokens      #{cfg["max_tokens"] || 800}")
-    IO.puts("  default_model   #{model_display(cfg["default_model"])}")
+    IO.puts("  max_tokens          #{cfg["max_tokens"] || 800}")
+    IO.puts("  default_model       #{model_display(cfg["default_model"])}")
+    IO.puts("  max_history_tokens  #{cfg["max_history_tokens"] || 2000}")
     IO.puts("")
     IO.puts(dim("  edit directly → #{config_path()}"))
-    IO.puts(dim("  or: lps config max <N>  ·  lps config model <#|name>"))
+    IO.puts(dim("  or: lps config max <N> · model <#|name> · history <N>"))
   end
 
   defp cmd_config(["init" | _]) do
@@ -266,6 +362,20 @@ defmodule LapsusAgent.CLI do
     write_config(Map.put(read_config(), "default_model", name))
     IO.puts("Default model set to #{name} — lps ask can now skip the picker.")
   end
+
+  defp cmd_config(["history", v | _]) do
+    case Integer.parse(v) do
+      {n, _} when n > 0 ->
+        write_config(Map.put(read_config(), "max_history_tokens", n))
+        IO.puts("Chat context budget set to #{num(n)} tokens (resent each turn in lps chat).")
+
+      _ ->
+        err("usage: lps config history <number>")
+    end
+  end
+
+  defp cmd_config(["history"]),
+    do: IO.puts("max_history_tokens = #{read_config()["max_history_tokens"] || "2000 (default)"}")
 
   defp cmd_config(["model"]), do: IO.puts("default_model = #{model_display(read_config()["default_model"])}")
   defp cmd_config(_), do: err("usage: lps config [init | max <N> | model <#|name|none>]")
@@ -499,12 +609,13 @@ defmodule LapsusAgent.CLI do
 
   # --- chat history (local) ---
 
-  defp append_history(model, prompt, res) do
+  defp append_history(model, prompt, res, thread \\ nil) do
     File.mkdir_p(lapsus_dir())
 
     line =
       Jason.encode!(%{
         "ts" => DateTime.utc_now() |> DateTime.to_iso8601(),
+        "thread" => thread,
         "model" => model,
         "prompt" => prompt,
         "response" => res.response,
@@ -578,10 +689,12 @@ defmodule LapsusAgent.CLI do
     %{
       "_help" => %{
         "max_tokens" => "default output budget for `lps ask` (a ceiling, not a target; --max overrides per call)",
-        "default_model" => "model `lps ask` uses when you don't name one (empty = show the picker)"
+        "default_model" => "model `lps ask` uses when you don't name one (empty = show the picker)",
+        "max_history_tokens" => "tokens of prior conversation `lps chat` resends as context each turn — you pay for these as input, so higher = more memory, more cost"
       },
       "max_tokens" => 800,
-      "default_model" => ""
+      "default_model" => "",
+      "max_history_tokens" => 2000
     }
   end
 
@@ -597,6 +710,14 @@ defmodule LapsusAgent.CLI do
     case read_config()["max_tokens"] do
       n when is_integer(n) and n > 0 -> n
       _ -> 800
+    end
+  end
+
+  # How many tokens of prior chat `lps chat` resends as context. Config, else 2000.
+  defp default_history_tokens do
+    case read_config()["max_history_tokens"] do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 2000
     end
   end
 
@@ -797,9 +918,11 @@ defmodule LapsusAgent.CLI do
       lps models [all | <search>]         list models (top 5 by providers, all, or search)
       lps ask [<#|model>] "<prompt>" [--max N]
                                           ask — pick by number/name, or interactive picker
+      lps chat [<#|model>] [--max N]      multi-turn chat (keeps context across turns)
       lps usage [--days N]                what you used + per-day bars
       lps history [N]                     your recent prompts (local)
-      lps config [max <N> | model <m>]    show / set defaults (ask budget, default model)
+      lps config [max <N> | model <m> | history <N>]
+                                          show / set defaults (ask budget, model, chat context)
       lps balance                         peer id + CC balance
       lps version                         running version + update check
       lps update                          update to the latest release (in place)
