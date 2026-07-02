@@ -1,3 +1,4 @@
+<!-- LAPSUS-VERIFY: lapsus-verify-PMvn08-Wz84ClUUxDvqv -->
 <div align="center">
 
 <img src="apps/lapsus_agent/priv/static/lapsus.png" alt="LAPSUS" width="120" />
