@@ -18,6 +18,7 @@ defmodule LapsusAgent.CLI do
   """
 
   alias LapsusAgent.{Consumer, Tools, Version}
+  alias LapsusCore.Credits
 
   # Max tool round-trips per ask before we force a final answer (bounds cost + loops).
   @max_tool_steps 4
@@ -175,12 +176,31 @@ defmodule LapsusAgent.CLI do
         err("no prompt given.")
 
       true ->
+        show_estimate(prompt, max, fetch_urls != [] or tools?)
         # explicit: prefetch the named URLs and prepend their text as context.
         seed = if fetch_urls == [], do: prompt, else: fetch_context(fetch_urls) <> "\n\nQuestion: " <> prompt
 
         if tools?,
           do: with({:ok, res} <- agent_run(model, prompt, seed, max), do: append_history(model, prompt, res)),
           else: do_ask(model, prompt, seed, max)
+    end
+  end
+
+  # A pre-send cost estimate: worst case is the whole output budget, billed with
+  # weight 1.0 (the client doesn't know the model's real weight). `more?` flags cases
+  # (--fetch / -t) where fetched pages or extra tool turns push the real cost higher.
+  defp show_estimate(prompt, max, more?) do
+    in_est = div(byte_size(prompt), 4) + 8
+    est = Credits.cost(in_est, max, 1.0)
+    plus = if more?, do: "+ pages/tools", else: ""
+    IO.puts(margin(dim("≈ up to #{num(est)} CC #{plus}(max output · actual usually less)")))
+
+    case read_cache() do
+      %{"balance" => bal} when is_integer(bal) and bal > 0 and est > bal ->
+        IO.puts(margin(dim("⚠ estimate exceeds your cached balance (#{num(bal)} CC) — it may not be billed")))
+
+      _ ->
+        :ok
     end
   end
 
@@ -642,8 +662,19 @@ defmodule LapsusAgent.CLI do
   end
 
   defp billing(%{billed: true, cc: cc, balance: bal}), do: "#{num(cc)} CC charged · balance #{num(bal)} CC"
-  defp billing(%{billed: false, cc: cc}), do: "NOT billed (#{num(cc)} CC — insufficient funds)"
-  defp billing(_), do: "not billed"
+
+  # Show the *actual* settlement failure reason, not a hardcoded one.
+  defp billing(%{billed: false, cc: cc, billing_error: err}),
+    do: "NOT billed (#{num(cc)} CC — #{billing_reason(err)})"
+
+  defp billing(%{billed: false, cc: cc}), do: "NOT billed (#{num(cc)} CC — settlement failed)"
+  defp billing(_), do: "not billed (no receipt)"
+
+  defp billing_reason(%{"reason" => r}), do: billing_reason(r)
+  defp billing_reason("insufficient_funds"), do: "insufficient funds"
+  defp billing_reason("duplicate_job"), do: "already booked (duplicate)"
+  defp billing_reason("invalid_" <> what), do: "rejected — invalid #{what}"
+  defp billing_reason(other), do: to_string(other)
 
   # --- models ---
 
