@@ -41,23 +41,36 @@ defmodule LapsusAgent.Tools do
   addresses — the provider's model output is attacker-influenceable, so a hostile
   provider could aim a `TOOL:` line at the consumer's own LAN.
   """
-  def fetch_url(url) do
-    cond do
-      not http_url?(url) -> "(error: only http(s) URLs are allowed)"
-      blocked_host?(url) -> "(error: refusing to fetch a private/local address)"
-      true -> do_fetch(url)
+  @max_redirects 3
+
+  def fetch_url(url), do: fetch_url(url, @max_redirects)
+
+  defp fetch_url(_url, left) when left < 0, do: "(error: too many redirects)"
+
+  defp fetch_url(url, left) do
+    case validate(url) do
+      :ok -> do_fetch(url, left)
+      {:error, msg} -> msg
     end
   end
 
-  defp do_fetch(url) do
+  # Follow redirects manually (redirect: false) so every hop's target is re-validated —
+  # otherwise a hostile page could 3xx-redirect us at a private/metadata address.
+  defp do_fetch(url, left) do
     case Req.get(url,
            headers: [{"user-agent", "lapsus-lps/1.0 (+https://lapsus.pyrates.io)"}],
-           max_redirects: 3,
+           redirect: false,
            connect_options: [timeout: 10_000],
            receive_timeout: 15_000,
            retry: false,
            decode_body: false
          ) do
+      {:ok, %Req.Response{status: status} = resp} when status in 300..399 ->
+        case redirect_target(resp, url) do
+          nil -> "(error: redirect without a location)"
+          next -> fetch_url(next, left - 1)
+        end
+
       {:ok, %Req.Response{status: status} = resp} when status in 200..299 ->
         render_body(resp)
 
@@ -69,6 +82,14 @@ defmodule LapsusAgent.Tools do
     end
   rescue
     e -> "(error: #{Exception.message(e)})"
+  end
+
+  # Absolute URL of a redirect's Location (relative locations resolved against `base`).
+  defp redirect_target(resp, base) do
+    case Req.Response.get_header(resp, "location") do
+      [loc | _] when is_binary(loc) and loc != "" -> base |> URI.merge(loc) |> URI.to_string()
+      _ -> nil
+    end
   end
 
   defp render_body(resp) do
@@ -129,41 +150,79 @@ defmodule LapsusAgent.Tools do
       else: text
   end
 
-  # --- URL safety ---
+  # --- URL safety (SSRF) ---
 
-  defp http_url?(url) do
-    case URI.parse(url) do
-      %URI{scheme: s, host: h} when s in ["http", "https"] and is_binary(h) and h != "" -> true
-      _ -> false
-    end
-  end
-
-  defp blocked_host?(url) do
-    host = (URI.parse(url).host || "") |> String.downcase()
+  # One rule, checked on every hop: http(s) only, then RESOLVE the host and reject if
+  # *any* resolved address is private/local. Guarding the resolved IP (not the URL
+  # string) closes redirects, DNS-rebinding, IPv4-mapped IPv6, 0.0.0.0/8 and trailing
+  # dots at once. (Pragmatic: we resolve-then-connect, so a fast-flipping DNS TOCTOU
+  # isn't fully pinned — good enough for this threat model; pin-to-IP is a later upgrade.)
+  defp validate(url) do
+    uri = URI.parse(url)
+    host = uri.host && (uri.host |> String.downcase() |> String.trim_trailing("."))
 
     cond do
-      host == "" -> true
-      host in ["localhost", "localhost.localdomain"] -> true
-      String.ends_with?(host, ".localhost") -> true
-      true -> private_ip?(host)
+      uri.scheme not in ["http", "https"] -> {:error, "(error: only http(s) URLs are allowed)"}
+      host in [nil, ""] -> {:error, "(error: bad URL)"}
+      local_name?(host) -> {:error, "(error: refusing to fetch a private/local address)"}
+      true -> validate_resolved(host)
     end
   end
 
-  # Block literal private / loopback / link-local addresses (v4 + v6). A hostname that
-  # DNS-resolves to a private IP is not caught yet (see doc/tech/tools.md).
-  defp private_ip?(host) do
-    case :inet.parse_address(String.to_charlist(host)) do
-      {:ok, {127, _, _, _}} -> true
-      {:ok, {10, _, _, _}} -> true
-      {:ok, {192, 168, _, _}} -> true
-      {:ok, {169, 254, _, _}} -> true
-      {:ok, {172, b, _, _}} when b >= 16 and b <= 31 -> true
-      {:ok, {0, 0, 0, 0, 0, 0, 0, 1}} -> true
-      {:ok, addr} when tuple_size(addr) == 8 -> v6_private?(elem(addr, 0))
-      _ -> false
+  defp local_name?(host),
+    do: host in ["localhost", "localhost.localdomain"] or String.ends_with?(host, ".localhost")
+
+  defp validate_resolved(host) do
+    case resolve(host) do
+      {:ok, addrs} ->
+        if Enum.any?(addrs, &private_ip?/1),
+          do: {:error, "(error: refusing to fetch a private/local address)"},
+          else: :ok
+
+      :error ->
+        {:error, "(error: could not resolve host)"}
     end
   end
 
-  # fc00::/7 (unique-local) or fe80::/10 (link-local)
-  defp v6_private?(first), do: (first >= 0xFC00 and first <= 0xFDFF) or (first >= 0xFE80 and first <= 0xFEBF)
+  # Resolve to IP tuples (v4 + v6). A literal IP resolves to itself.
+  defp resolve(host) do
+    hl = String.to_charlist(host)
+
+    v4 =
+      case :inet.getaddrs(hl, :inet) do
+        {:ok, a} -> a
+        _ -> []
+      end
+
+    v6 =
+      case :inet.getaddrs(hl, :inet6) do
+        {:ok, a} -> a
+        _ -> []
+      end
+
+    case v4 ++ v6 do
+      [] -> :error
+      addrs -> {:ok, addrs}
+    end
+  end
+
+  # Private / loopback / link-local / CGNAT — takes an IP TUPLE (already resolved).
+  defp private_ip?({127, _, _, _}), do: true
+  defp private_ip?({10, _, _, _}), do: true
+  defp private_ip?({0, _, _, _}), do: true
+  defp private_ip?({192, 168, _, _}), do: true
+  defp private_ip?({169, 254, _, _}), do: true
+  defp private_ip?({172, b, _, _}) when b >= 16 and b <= 31, do: true
+  defp private_ip?({100, b, _, _}) when b >= 64 and b <= 127, do: true
+  defp private_ip?({_, _, _, _}), do: false
+  # IPv6
+  defp private_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  defp private_ip?({0, 0, 0, 0, 0, 0, 0, 0}), do: true
+  # IPv4-mapped ::ffff:a.b.c.d → check the embedded v4 address
+  defp private_ip?({0, 0, 0, 0, 0, 0xFFFF, a, b}),
+    do: private_ip?({div(a, 256), rem(a, 256), div(b, 256), rem(b, 256)})
+
+  defp private_ip?({h, _, _, _, _, _, _, _}) when h >= 0xFC00 and h <= 0xFDFF, do: true
+  defp private_ip?({h, _, _, _, _, _, _, _}) when h >= 0xFE80 and h <= 0xFEBF, do: true
+  defp private_ip?(_), do: false
 end

@@ -44,6 +44,9 @@ defmodule LapsusAgent.Peer.Session do
   # DataChannel being reliable+ordered (SCTP default), so chunks arrive in order.
   @chunk 16_000
   @frame_magic "LPZ"
+  # Ceiling on a single reassembled message — far above any real answer, bounds a
+  # memory-exhaustion attack from a peer streaming endless non-final chunks.
+  @max_reassembly 8_000_000
 
   # Public STUN fallback (Google + Cloudflare) — only address discovery, no traffic
   # flows through them. Lets ICE gather server-reflexive candidates for NAT hole
@@ -78,7 +81,8 @@ defmodule LapsusAgent.Peer.Session do
       ice_servers: Keyword.get(opts, :ice_servers, default_ice_servers()),
       channel_ref: nil,
       # accumulates chunk payloads (iolist) until a final frame completes the message
-      rx_buffer: []
+      rx_buffer: [],
+      rx_size: 0
     }
 
     {:ok, pc} = PeerConnection.start_link(ice_servers: state.ice_servers)
@@ -145,16 +149,24 @@ defmodule LapsusAgent.Peer.Session do
     {:noreply, state}
   end
 
-  # a non-final chunk: buffer its payload, wait for more.
+  # a non-final chunk: buffer its payload, wait for more. Cap total reassembly size so a
+  # malicious peer streaming endless non-final chunks can't exhaust memory.
   def handle_info({:ex_webrtc, _pc, {:data, _ref, <<0, @frame_magic, 1, payload::binary>>}}, state) do
-    {:noreply, %{state | rx_buffer: [state.rx_buffer, payload]}}
+    size = state.rx_size + byte_size(payload)
+
+    if size > @max_reassembly do
+      Logger.warning("[peer #{state.role}] dropping oversized reassembly (>#{@max_reassembly} bytes)")
+      {:noreply, %{state | rx_buffer: [], rx_size: 0}}
+    else
+      {:noreply, %{state | rx_buffer: [state.rx_buffer, payload], rx_size: size}}
+    end
   end
 
   # a final chunk: reassemble the buffered payloads with this one, deliver, reset.
   def handle_info({:ex_webrtc, _pc, {:data, _ref, <<0, @frame_magic, 0, payload::binary>>}}, state) do
     message = IO.iodata_to_binary([state.rx_buffer, payload])
     notify(state, {:peer_data, self(), message})
-    {:noreply, %{state | rx_buffer: []}}
+    {:noreply, %{state | rx_buffer: [], rx_size: 0}}
   end
 
   # a raw (unframed) message — the common small-payload path, delivered as-is.
