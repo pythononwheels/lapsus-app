@@ -24,6 +24,9 @@ defmodule LapsusAgent.UI.LandingLive do
          range: "week",
          usage: nil,
          loading_usage: true,
+         prov_page: 0,
+         cons_page: 0,
+         log_size: 10,
          error: nil,
          quitting: false,
          update: nil
@@ -103,6 +106,20 @@ defmodule LapsusAgent.UI.LandingLive do
     days = range_days(range)
     Task.start(fn -> send(parent, {:usage, Consumer.full_usage(days)}) end)
     {:noreply, assign(socket, range: range, loading_usage: true)}
+  end
+
+  def handle_event("log_size", %{"size" => s}, socket) do
+    size = if s == "25", do: 25, else: 10
+    {:noreply, assign(socket, log_size: size, prov_page: 0, cons_page: 0)}
+  end
+
+  def handle_event("log_page", %{"role" => role, "dir" => dir}, socket) do
+    key = if role == "provider", do: :prov_page, else: :cons_page
+    rows = log_rows(socket.assigns.usage, role)
+    last = max(0, ceil(length(rows) / socket.assigns.log_size) - 1)
+    step = if dir == "next", do: 1, else: -1
+    page = (socket.assigns[key] + step) |> max(0) |> min(last)
+    {:noreply, assign(socket, [{key, page}])}
   end
 
   def handle_event("quit", _params, socket) do
@@ -189,6 +206,9 @@ defmodule LapsusAgent.UI.LandingLive do
           </section>
         </div>
 
+        <.log_panel title="Requests served" note="you as provider" rows={log_rows(@usage, "provider")}
+                    page={@prov_page} size={@log_size} role="provider" />
+
         <div class="usage-grid">
           <section class="panel">
             <h4>Requests over time <span class="muted">· as consumer</span></h4>
@@ -207,6 +227,9 @@ defmodule LapsusAgent.UI.LandingLive do
             </div>
           </section>
         </div>
+
+        <.log_panel title="Requests made" note="you as consumer" rows={log_rows(@usage, "consumer")}
+                    page={@cons_page} size={@log_size} role="consumer" />
       </section>
 
       <section class="dcard">
@@ -279,6 +302,67 @@ defmodule LapsusAgent.UI.LandingLive do
   defp range_label("month"), do: "last 30 days"
   defp range_label("all"), do: "all time"
   defp range_label(other), do: "last #{other}"
+
+  # The recent-job list for a role from the usage payload (string-keyed, from the wire).
+  defp log_rows(%{} = usage, key), do: Map.get(usage, "#{key}_recent") || []
+  defp log_rows(_usage, _key), do: []
+
+  # A paginated, non-identifying request log (time · model · in/out · CC · ok · #peer).
+  attr :title, :string, required: true
+  attr :note, :string, required: true
+  attr :rows, :list, required: true
+  attr :page, :integer, required: true
+  attr :size, :integer, required: true
+  attr :role, :string, required: true
+
+  defp log_panel(assigns) do
+    total = length(assigns.rows)
+    pages = max(1, ceil(total / assigns.size))
+    page = min(assigns.page, pages - 1)
+
+    assigns =
+      assign(assigns, total: total, pages: pages, page: page, slice: Enum.slice(assigns.rows, page * assigns.size, assigns.size))
+
+    ~H"""
+    <section class="panel logpanel">
+      <div class="row">
+        <h4>{@title} <span class="muted">· {@note}{if @total > 0, do: " · #{@total}", else: ""}</span></h4>
+        <div class="pills">
+          <button class={"pill #{if @size == 10, do: "on"}"} phx-click="log_size" phx-value-size="10">10</button>
+          <button class={"pill #{if @size == 25, do: "on"}"} phx-click="log_size" phx-value-size="25">25</button>
+        </div>
+      </div>
+
+      <p :if={@total == 0} class="muted" style="padding:.5rem 0 0">No requests yet.</p>
+
+      <table :if={@total > 0} class="logtbl">
+        <thead>
+          <tr><th>Time</th><th>Model</th><th class="r">in/out</th><th class="r">CC</th><th></th><th class="r">peer</th></tr>
+        </thead>
+        <tbody>
+          <tr :for={r <- @slice}>
+            <td class="mono muted">{fmt_ts(r["ts"])}</td>
+            <td class="mono">{r["model"]}</td>
+            <td class="mono r">{num(r["in"] || 0)}/{num(r["out"] || 0)}</td>
+            <td class="mono r">{num(r["cc"] || 0)}</td>
+            <td class={"c #{if r["ok"], do: "ok", else: "bad"}"}>{if r["ok"], do: "✓", else: "✗"}</td>
+            <td class="mono muted r">{r["party"]}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div :if={@pages > 1} class="logpg">
+        <button class="pill" phx-click="log_page" phx-value-role={@role} phx-value-dir="prev" disabled={@page == 0}>‹ prev</button>
+        <span class="muted">{@page + 1} / {@pages}</span>
+        <button class="pill" phx-click="log_page" phx-value-role={@role} phx-value-dir="next" disabled={@page + 1 >= @pages}>next ›</button>
+      </div>
+    </section>
+    """
+  end
+
+  # "2026-07-03T14:32:…Z" -> "07-03 14:32"
+  defp fmt_ts(ts) when is_binary(ts), do: ts |> String.slice(5, 11) |> String.replace("T", " ")
+  defp fmt_ts(_), do: ""
 
   # Pull one side ("provider" / "consumer") out of the full-usage map; nil-safe so
   # the charts render an empty (but framed) shape before the fetch returns.

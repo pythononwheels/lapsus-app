@@ -207,6 +207,21 @@ defmodule LapsusAgent.UI.Layouts do
           /* faint "no data" overlay shown over an empty (but still framed) chart */
           .chartbox .nodata{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
                             color:var(--muted);opacity:.5;font-size:.85rem;pointer-events:none}
+          /* request log table under each activity chart */
+          .logpanel{margin-top:1rem}
+          .logpanel .row{align-items:center}
+          .logtbl{width:100%;border-collapse:collapse;margin-top:.5rem;font-size:.82rem}
+          .logtbl th{text-align:left;font-weight:600;color:var(--muted);font-size:.74rem;
+                     text-transform:uppercase;letter-spacing:.03em;padding:.2rem .5rem .35rem;border-bottom:1px solid var(--line)}
+          .logtbl td{padding:.3rem .5rem;border-bottom:1px solid var(--line)}
+          .logtbl tr:last-child td{border-bottom:0}
+          .logtbl .r{text-align:right}
+          .logtbl .c{text-align:center}
+          .logtbl .c.ok{color:#3a9a6b}
+          .logtbl .c.bad{color:#c0563e}
+          .logtbl .mono{font-family:ui-monospace,Menlo,monospace}
+          .logpg{display:flex;align-items:center;justify-content:center;gap:.8rem;margin-top:.7rem}
+          .logpg .pill:disabled{opacity:.4;cursor:default}
           /* use-AI: file upload + estimate row */
           .uploadrow{display:flex;align-items:center;gap:.6rem;margin-top:.6rem;flex-wrap:wrap}
           .filebtn{display:inline-flex;align-items:center;gap:.3rem;font-size:.82rem;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:.32rem .6rem;cursor:pointer;width:auto}
