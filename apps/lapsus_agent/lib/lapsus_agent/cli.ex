@@ -103,6 +103,7 @@ defmodule LapsusAgent.CLI do
     section("How to use")
     howto("lps ask 1 \"your prompt\"", "ask a model by number")
     howto("lps chat 1", "multi-turn chat (keeps context)")
+    howto("lps gateway", "local OpenAI-compatible API (/v1)")
     howto("lps models [search]", "browse / search models")
     howto("lps projects", "open-source projects to support")
     howto("lps help", "all commands")
