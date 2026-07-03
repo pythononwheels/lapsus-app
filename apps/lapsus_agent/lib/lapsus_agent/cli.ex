@@ -1051,126 +1051,30 @@ defmodule LapsusAgent.CLI do
     end
   end
 
-  # A small line editor for the chat prompt: Shift+Enter inserts a newline, Enter
-  # submits. Uses raw terminal mode when available; on any failure it falls back to a
-  # plain `IO.gets` line read, so the chat never breaks. Returns the trimmed input, or
-  # nil on EOF/Ctrl+C.
-  defp read_chat_line(prompt) do
-    IO.write(prompt)
+  # Chat prompt with Shift+Enter = newline, Enter = send — without raw mode. The
+  # terminal sends ESC+CR for Shift+Enter, so in normal (cooked) line mode `IO.gets`
+  # returns a line that ends in an ESC sequence: that means "continue on the next line".
+  # A line without a trailing ESC submits. Normal per-line editing (backspace) still
+  # works because we stay in cooked mode. Returns the joined input, or nil on EOF.
+  defp read_chat_line(prompt), do: gather_lines(prompt, [])
 
-    case enable_raw() do
-      {:ok, saved} ->
-        try do
-          edit_loop("")
-        catch
-          :cancel -> nil
-        after
-          disable_raw(saved)
+  defp gather_lines(prompt, acc) do
+    case IO.gets(prompt) do
+      line when is_binary(line) ->
+        line = String.trim_trailing(line, "\n")
+
+        case Regex.run(~r/(?:\x1b[^\x1b]*)+$/, line, return: :index) do
+          # trailing ESC sequence(s) → Shift+Enter → keep the text before it, read on
+          [{i, _} | _] -> gather_lines("", [binary_part(line, 0, i) | acc])
+          _ -> finish_lines([line | acc])
         end
-
-      :error ->
-        # prompt already printed; fall back to a normal line read (no multi-line)
-        case IO.gets("") do
-          s when is_binary(s) -> String.trim(s)
-          _ -> nil
-        end
-    end
-  end
-
-  defp enable_raw do
-    with {saved, 0} <- System.cmd("sh", ["-c", "stty -g < /dev/tty 2>/dev/null"]),
-         {_, 0} <- System.cmd("sh", ["-c", "stty -icanon -echo min 1 time 0 < /dev/tty 2>/dev/null"]) do
-      {:ok, String.trim(saved)}
-    else
-      _ -> :error
-    end
-  rescue
-    _ -> :error
-  end
-
-  defp disable_raw(saved), do: System.cmd("sh", ["-c", "stty #{saved} < /dev/tty 2>/dev/null"])
-
-  # Character-at-a-time edit loop over the raw tty. `acc` is the input so far.
-  defp edit_loop(acc) do
-    case IO.getn("", 1) do
-      :eof ->
-        String.trim(acc)
-
-      <<c>> when c in [0x0D, 0x0A] ->
-        IO.write("\n")
-        String.trim(acc)
-
-      # Ctrl+C / Ctrl+D (on empty) → cancel
-      <<0x03>> ->
-        IO.write("\n")
-        throw(:cancel)
-
-      <<0x04>> ->
-        if acc == "", do: throw(:cancel), else: edit_loop(acc)
-
-      # Backspace / Delete
-      <<c>> when c in [0x7F, 0x08] ->
-        edit_loop(backspace(acc))
-
-      # ESC — could be Shift+Enter or an arrow/other escape sequence
-      <<0x1B>> ->
-        edit_loop(handle_esc(acc))
-
-      # any printable char (getn returns a full UTF-8 grapheme)
-      ch when is_binary(ch) ->
-        IO.write(ch)
-        edit_loop(acc <> ch)
-    end
-  end
-
-  defp backspace(""), do: ""
-
-  defp backspace(acc) do
-    {keep, last} = String.split_at(acc, -1)
-    # can't visually un-wrap a previous newline; just drop it from the buffer
-    unless last == "\n", do: IO.write("\b \b")
-    keep
-  end
-
-  # After an ESC: ESC+CR/LF is Shift+Enter (this terminal) → newline; a CSI sequence
-  # (arrows etc.) is consumed and ignored, unless it encodes a modified Enter.
-  defp handle_esc(acc) do
-    case IO.getn("", 1) do
-      <<c>> when c in [0x0D, 0x0A] ->
-        IO.write("\n")
-        acc <> "\n"
-
-      <<?[>> ->
-        seq = consume_csi("")
-
-        if shift_enter_csi?(seq) do
-          IO.write("\n")
-          acc <> "\n"
-        else
-          acc
-        end
-
-      <<?O>> ->
-        _ = IO.getn("", 1)
-        acc
 
       _ ->
-        acc
+        if acc == [], do: nil, else: finish_lines(acc)
     end
   end
 
-  # Read a CSI sequence up to and including its final byte (0x40–0x7e).
-  defp consume_csi(seq) do
-    case IO.getn("", 1) do
-      :eof -> seq
-      <<c>> when c in 0x40..0x7E -> seq <> <<c>>
-      <<c>> -> consume_csi(seq <> <<c>>)
-      _ -> seq
-    end
-  end
-
-  # xterm modifyOtherKeys (27;2;13~) or kitty (13;2u) encodings of Shift+Enter.
-  defp shift_enter_csi?(seq), do: String.contains?(seq, "27;2;13") or String.contains?(seq, "13;2")
+  defp finish_lines(acc), do: acc |> Enum.reverse() |> Enum.join("\n") |> String.trim()
 
   # Run `fun` while animating a small spinner on stderr; clears the line when done.
   # stderr keeps stdout (and pipes like `| head`) clean.
