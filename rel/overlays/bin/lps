@@ -17,4 +17,11 @@ here="$(cd "$(dirname "$self")" && pwd)"
 
 LPS_ARGV="$(printf '%s\0' "$@" | base64 | tr -d '\n')"
 export LPS_ARGV
-exec "$here/lapsus" eval 'LapsusAgent.CLI.main_from_env()'
+# `lps gateway` is a long-running server. Detach its stdin from the terminal so
+# `lps gateway &` isn't SIGTTIN-stopped by job control (the BEAM otherwise tries to
+# read the backgrounded tty). Interactive commands (ask/chat/picker) keep stdin.
+if [ "$1" = "gateway" ]; then
+  exec "$here/lapsus" eval 'LapsusAgent.CLI.main_from_env()' < /dev/null
+else
+  exec "$here/lapsus" eval 'LapsusAgent.CLI.main_from_env()'
+fi
