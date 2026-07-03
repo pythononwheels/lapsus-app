@@ -9,6 +9,18 @@ defmodule LapsusAgent.UI.Router do
     plug :put_root_layout, html: {LapsusAgent.UI.Layouts, :root}
   end
 
+  # Stateless JSON pipeline for the local OpenAI-compatible gateway — no session/CSRF.
+  pipeline :api do
+    plug :accepts, ["json"]
+  end
+
+  # OpenAI-compatible gateway (protocol.md §7). Localhost-only; spends your credits.
+  scope "/v1", LapsusAgent.API do
+    pipe_through :api
+    post "/chat/completions", GatewayController, :chat_completions
+    get "/models", GatewayController, :models
+  end
+
   scope "/" do
     pipe_through :browser
     live "/", LapsusAgent.UI.LandingLive

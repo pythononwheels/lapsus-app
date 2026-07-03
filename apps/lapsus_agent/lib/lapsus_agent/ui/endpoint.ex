@@ -32,6 +32,9 @@ defmodule LapsusAgent.UI.Endpoint do
   # Vendored Chart.js (no bundler) for the dashboards.
   plug Plug.Static, at: "/vendor/chartjs", from: {:lapsus_agent, "priv/static/vendor"}, only: ~w(chart.umd.min.js)
 
+  # JSON bodies for the /v1 gateway (the LiveView UI didn't need a body parser before).
+  plug Plug.Parsers, parsers: [:json], pass: ["application/json"], json_decoder: Jason
+
   plug Plug.Session, @session_options
   plug LapsusAgent.UI.Router
 end
