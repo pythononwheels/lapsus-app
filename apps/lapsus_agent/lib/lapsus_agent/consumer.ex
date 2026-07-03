@@ -255,7 +255,10 @@ defmodule LapsusAgent.Consumer do
             handler: self()
           )
 
-        job_id = "job-" <> Integer.to_string(System.unique_integer([:positive]))
+        # Globally-unique job id. `System.unique_integer` is only unique within this
+        # BEAM (and resets on restart), so different peers collided in the shared
+        # ledger → "duplicate_job" (provider unpaid). 128 bits of randomness fixes it.
+        job_id = "job-" <> (:crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false))
         frame = Protocol.encode_request(job_id, model, prompt, req_opts)
         result = drive(coord, session, identity, frame, timeout)
         safe_stop(session)
