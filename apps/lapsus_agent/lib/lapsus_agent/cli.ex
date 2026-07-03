@@ -1056,17 +1056,27 @@ defmodule LapsusAgent.CLI do
   # returns a line that ends in an ESC sequence: that means "continue on the next line".
   # A line without a trailing ESC submits. Normal per-line editing (backspace) still
   # works because we stay in cooked mode. Returns the joined input, or nil on EOF.
-  defp read_chat_line(prompt), do: gather_lines(prompt, [])
+  defp read_chat_line(prompt) do
+    IO.write(prompt)
+    # the visible part of the prompt (drop the leading blank line) — used when redrawing
+    gather_lines(String.trim_leading(prompt, "\n"), [])
+  end
 
-  defp gather_lines(prompt, acc) do
-    case IO.gets(prompt) do
+  defp gather_lines(vis, acc) do
+    case IO.gets("") do
       line when is_binary(line) ->
         line = String.trim_trailing(line, "\n")
 
         case Regex.run(~r/(?:\x1b[^\x1b]*)+$/, line, return: :index) do
-          # trailing ESC sequence(s) → Shift+Enter → keep the text before it, read on
-          [{i, _} | _] -> gather_lines("", [binary_part(line, 0, i) | acc])
-          _ -> finish_lines([line | acc])
+          [{i, _} | _] ->
+            # Shift+Enter: the terminal echoed the ESC as a visible `^[`. Redraw the line
+            # cleanly (cursor up, clear, reprint without the ESC), then read the next line.
+            clean = binary_part(line, 0, i)
+            IO.write("\e[A\r\e[2K" <> vis <> clean <> "\n")
+            gather_lines("", [clean | acc])
+
+          _ ->
+            finish_lines([line | acc])
         end
 
       _ ->
