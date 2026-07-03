@@ -56,6 +56,7 @@ defmodule LapsusAgent.CLI do
       ["ask" | rest] -> cmd_ask(rest)
       ["chat" | rest] -> cmd_chat(rest)
       ["tools" | rest] -> cmd_tools(rest)
+      ["gateway" | rest] -> cmd_gateway(rest)
       ["projects" | _] -> cmd_projects()
       ["donate" | rest] -> cmd_donate(rest)
       ["config" | rest] -> cmd_config(rest)
@@ -488,6 +489,34 @@ defmodule LapsusAgent.CLI do
           IO.puts("  #{dim(short_ts(e["ts"]))}  #{e["model"]}  #{dim(num(e["cc"] || 0) <> " CC")}")
           IO.puts("    #{truncate(e["prompt"], 64)}")
         end)
+    end
+  end
+
+  # --- gateway (headless local OpenAI-compatible API server) ---
+
+  defp cmd_gateway(rest) do
+    {opts, _pos} = split_opts(rest)
+
+    case int_opt(opts, "--port", nil) do
+      nil -> :ok
+      p -> System.put_env("LAPSUS_UI_PORT", to_string(p))
+    end
+
+    case LapsusAgent.UI.Launcher.start!() do
+      {:ok, _sup} ->
+        port = LapsusAgent.UI.Launcher.port()
+        w = term_width()
+        IO.puts("")
+        IO.puts(frame_top("gateway", w))
+        IO.puts(margin("OpenAI-compatible API → " <> IO.ANSI.bright() <> "http://localhost:#{port}/v1" <> IO.ANSI.reset()))
+        IO.puts(margin(dim("point any OpenAI SDK at that base_url · prompts still travel P2P")))
+        IO.puts(margin(dim("localhost-only · a provider must be online to serve · Ctrl+C to stop")))
+        IO.puts(frame_bottom(w))
+        # keep the endpoint alive in the foreground (run with & / nohup / systemd)
+        Process.sleep(:infinity)
+
+      {:error, reason} ->
+        err("couldn't start the gateway: #{inspect(reason)}")
     end
   end
 
@@ -1226,6 +1255,7 @@ defmodule LapsusAgent.CLI do
       lps chat [<#|model>] [--max N]      multi-turn chat (keeps context across turns)
                                           add -t to let the model use tools (web fetch)
       lps tools                           list consumer-side tools (run locally by lps)
+      lps gateway [--port N]              run a local OpenAI-compatible API (http://localhost:PORT/v1)
       lps projects                        open-source projects you can support (§03)
       lps donate <#|peer_id> <cc>         donate credits to a registered project
       lps usage [--days N]                what you used + per-day bars
