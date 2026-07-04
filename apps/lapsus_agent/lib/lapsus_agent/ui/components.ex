@@ -99,6 +99,7 @@ defmodule LapsusAgent.UI.Components do
         <a href="/provider" class={if @active == :share, do: "on"}>↑ &nbsp; Share AI</a>
         <a href="/ask" class={if @active == :use, do: "on"}>↓ &nbsp; Use AI</a>
         <div class="grp">Network</div>
+        <a href="/network" class={if @active == :network, do: "on"}>◈ &nbsp; Network stats</a>
         <a href="https://lapsus.pyrates.io" target="_blank" rel="noopener">◉ &nbsp; lapsus.pyrates.io</a>
       </nav>
 

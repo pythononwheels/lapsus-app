@@ -27,6 +27,7 @@ defmodule LapsusAgent.UI.Router do
     live "/welcome", LapsusAgent.UI.OnboardingLive
     live "/provider", LapsusAgent.UI.DashboardLive
     live "/ask", LapsusAgent.UI.ConsumeLive
+    live "/network", LapsusAgent.UI.NetworkLive
     live "/how", LapsusAgent.UI.HowItWorksLive
     live "/guardrail", LapsusAgent.UI.GuardrailLive
     live "/no-tools", LapsusAgent.UI.NoToolsLive

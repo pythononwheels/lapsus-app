@@ -53,6 +53,7 @@ defmodule LapsusAgent.CLI do
       ["models" | rest] -> cmd_models(rest)
       [b | _] when b in ["balance", "whoami"] -> cmd_balance()
       [i | _] when i in ["id", "peerid", "peer-id"] -> cmd_id()
+      [n | _] when n in ["network", "net", "network-stats"] -> cmd_network()
       ["usage" | rest] -> cmd_usage(rest)
       ["ask" | rest] -> cmd_ask(rest)
       ["chat" | rest] -> cmd_chat(rest)
@@ -155,6 +156,50 @@ defmodule LapsusAgent.CLI do
 
   # Print the full peer id, raw — copy-friendly, pipeable (`lps id | pbcopy`).
   defp cmd_id, do: IO.puts(Consumer.peer_id())
+
+  # Public network stats from the coordinator (aggregate; nothing per-peer).
+  defp cmd_network do
+    url = coordinator_http_base() <> "/api/stats"
+
+    case Req.get(url, connect_options: [timeout: 5_000], receive_timeout: 5_000, retry: false) do
+      {:ok, %Req.Response{status: 200, body: s}} when is_map(s) -> render_network(s)
+      _ -> err("couldn't reach the coordinator at #{url}")
+    end
+  end
+
+  defp coordinator_http_base do
+    LapsusAgent.Coordinator.default_url()
+    |> String.replace_prefix("wss://", "https://")
+    |> String.replace_prefix("ws://", "http://")
+    |> String.split("/")
+    |> Enum.take(3)
+    |> Enum.join("/")
+  end
+
+  defp render_network(s) do
+    life = s["lifetime"] || %{}
+    win = s["window7"] || %{}
+    cur = s["current"] || %{}
+
+    IO.puts("")
+    IO.puts("  " <> IO.ANSI.bright() <> "LAPSUS" <> IO.ANSI.reset() <> dim(" · community network"))
+
+    section("All time")
+    IO.puts("  tokens processed   #{num(life["tokens"] || 0)}")
+    IO.puts("  jobs served        #{num(life["jobs"] || 0)}")
+    IO.puts("  credits settled    #{num(life["cc"] || 0)} CC")
+
+    section("Last 7 days")
+    IO.puts("  tokens             #{num(win["tokens"] || 0)}")
+    IO.puts("  jobs               #{num(win["jobs"] || 0)}")
+    IO.puts("  active             #{num(win["active_consumers"] || 0)} users · #{num(win["active_providers"] || 0)} providers")
+
+    section("Right now")
+    IO.puts("  nodes online       #{num(cur["nodes_online"] || 0)}")
+    IO.puts("  providers          #{num(cur["providers_online"] || 0)}")
+    IO.puts("  models offered     #{num(cur["models"] || 0)}")
+    IO.puts("")
+  end
 
   # Horizontal per-day CC-spend bars for the `lps balance` dashboard.
   @chart_w 22
@@ -1303,6 +1348,7 @@ defmodule LapsusAgent.CLI do
                                           show / set defaults (ask budget, model, chat context)
       lps balance                         peer id + CC balance
       lps id                              print your full peer id (copy-friendly)
+      lps network                         community network stats (all-time + live)
       lps version                         running version + update check
       lps update                          update to the latest release (in place)
       lps help                            this help
