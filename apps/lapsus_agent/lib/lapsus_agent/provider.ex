@@ -177,7 +177,11 @@ defmodule LapsusAgent.Provider do
   @impl true
   def handle_info({:lapsus_joined, _topic}, state) do
     Logger.info("[provider] online — ready to serve.")
-    {:noreply, reconcile(%{state | joined: true})}
+    # A (re)join means the coordinator re-created our Presence from the join params
+    # (which advertise *no* models). Clear `announced` so reconcile/1 always
+    # re-advertises the current set — otherwise, after an automatic reconnect, we'd
+    # linger as a model-less node and vanish from discovery until caps next change.
+    {:noreply, reconcile(%{state | joined: true, announced: {MapSet.new(), %{}}})}
   end
 
   def handle_info({:lapsus_signal, %{"kind" => "offer", "from" => consumer} = p}, state) do
