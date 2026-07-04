@@ -132,18 +132,51 @@ defmodule LapsusAgent.CLI do
 
   defp cmd_balance do
     pid = Consumer.peer_id()
-    {u, src} = fetch_usage(1)
+    {u, src} = fetch_usage(7)
 
     box(pid, ((u && num(u["balance"] || 0)) || "?") <> " CC")
     IO.puts(dim("  " <> pid))
+
+    cdays = get_in(u || %{}, ["consumer", "days"]) || []
+
+    if Enum.any?(cdays, &((&1["cc"] || 0) > 0)) do
+      IO.puts("")
+      section("Spend · last 7d")
+      Enum.each(barchart(cdays), &IO.puts/1)
+    end
+
+    ct = get_in(u || %{}, ["consumer", "totals"]) || %{}
+    pt = get_in(u || %{}, ["provider", "totals"]) || %{}
     IO.puts("")
-    IO.puts("  spent today    #{num(get_in(u || %{}, ["consumer", "totals", "cc"]) || 0)} CC")
-    IO.puts("  earned today   #{num(get_in(u || %{}, ["provider", "totals", "cc"]) || 0)} CC")
+    IO.puts("  spent 7d    #{num(ct["cc"] || 0)} CC · #{num(ct["jobs"] || 0)} req")
+    IO.puts("  earned 7d   #{num(pt["cc"] || 0)} CC · #{num(pt["jobs"] || 0)} req")
     if src == :cached, do: IO.puts(dim("  (cached — coordinator unreachable)"))
   end
 
   # Print the full peer id, raw — copy-friendly, pipeable (`lps id | pbcopy`).
   defp cmd_id, do: IO.puts(Consumer.peer_id())
+
+  # Horizontal per-day CC-spend bars for the `lps balance` dashboard.
+  @chart_w 22
+  defp barchart(days) do
+    maxv = days |> Enum.map(&(&1["cc"] || 0)) |> Enum.max(fn -> 0 end)
+
+    Enum.map(days, fn d ->
+      cc = d["cc"] || 0
+      filled = if maxv == 0, do: 0, else: round(cc / maxv * @chart_w)
+      bar = String.duplicate("█", filled) <> dim(String.duplicate("·", @chart_w - filled))
+      "  #{daylabel(d["date"])}  #{bar}  #{num(cc)} CC"
+    end)
+  end
+
+  defp daylabel(date) when is_binary(date) do
+    case Date.from_iso8601(date) do
+      {:ok, d} -> Enum.at(~w(Mon Tue Wed Thu Fri Sat Sun), Date.day_of_week(d) - 1)
+      _ -> String.slice(date, 5, 5)
+    end
+  end
+
+  defp daylabel(_), do: "  ?"
 
   defp cmd_usage(rest) do
     days = int_opt(rest, "--days", 7)
