@@ -49,7 +49,7 @@ defmodule LapsusAgent.CLI do
       [] -> cmd_home()
       [h | _] when h in ["help", "-h", "--help"] -> help()
       [v | _] when v in ["version", "--version", "-v"] -> cmd_version()
-      [u | _] when u in ["update", "--update"] -> cmd_update()
+      [u | rest] when u in ["update", "--update"] -> cmd_update(rest)
       ["models" | rest] -> cmd_models(rest)
       [b | _] when b in ["balance", "whoami"] -> cmd_balance()
       [i | _] when i in ["id", "peerid", "peer-id"] -> cmd_id()
@@ -758,20 +758,21 @@ defmodule LapsusAgent.CLI do
     end
   end
 
-  defp cmd_update do
+  # `lps update` → latest stable (checks first). `lps update --dev|--beta` opts into
+  # the test track (newest release incl. prereleases) — bypasses the stable check.
+  defp cmd_update(args) do
+    cond do
+      "--dev" in args -> run_installer("dev")
+      "--beta" in args -> run_installer("beta")
+      true -> cmd_update_stable()
+    end
+  end
+
+  defp cmd_update_stable do
     case Version.check_update() do
       {:update, tag, _} ->
         IO.puts("Updating to #{tag} …")
-
-        {_, status} =
-          System.cmd("sh", ["-c", "curl -fsSL https://lapsus.pyrates.io/install.sh | sh"],
-            into: IO.stream(:stdio, :line),
-            stderr_to_stdout: true
-          )
-
-        if status == 0,
-          do: IO.puts(dim("\nDone — run `lps version` to confirm.")),
-          else: err("update failed (installer exit #{status}).")
+        run_installer("stable")
 
       :current ->
         IO.puts("Already up to date (#{Version.current()}).")
@@ -782,6 +783,18 @@ defmodule LapsusAgent.CLI do
       _ ->
         err("couldn't check for updates (offline or GitHub unreachable).")
     end
+  end
+
+  defp run_installer(channel) do
+    if channel != "stable", do: IO.puts("Updating to the latest #{channel} build …")
+    env = if channel == "stable", do: "", else: "LAPSUS_CHANNEL=#{channel} "
+    cmd = "curl -fsSL https://lapsus.pyrates.io/install.sh | #{env}sh"
+
+    {_, status} = System.cmd("sh", ["-c", cmd], into: IO.stream(:stdio, :line), stderr_to_stdout: true)
+
+    if status == 0,
+      do: IO.puts(dim("\nDone — run `lps version` to confirm.")),
+      else: err("update failed (installer exit #{status}).")
   end
 
   defp billing(%{billed: true, cc: cc, balance: bal}), do: "#{num(cc)} CC charged · balance #{num(bal)} CC"
@@ -1375,7 +1388,7 @@ defmodule LapsusAgent.CLI do
       lps id                              print your full peer id (copy-friendly)
       lps network                         community network stats (all-time + live)
       lps version                         running version + update check
-      lps update                          update to the latest release (in place)
+      lps update [--dev]                  update to the latest release (--dev = test track)
       lps help                            this help
 
     Examples
