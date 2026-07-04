@@ -52,6 +52,7 @@ defmodule LapsusAgent.CLI do
       [u | _] when u in ["update", "--update"] -> cmd_update()
       ["models" | rest] -> cmd_models(rest)
       [b | _] when b in ["balance", "whoami"] -> cmd_balance()
+      [i | _] when i in ["id", "peerid", "peer-id"] -> cmd_id()
       ["usage" | rest] -> cmd_usage(rest)
       ["ask" | rest] -> cmd_ask(rest)
       ["chat" | rest] -> cmd_chat(rest)
@@ -134,11 +135,15 @@ defmodule LapsusAgent.CLI do
     {u, src} = fetch_usage(1)
 
     box(pid, ((u && num(u["balance"] || 0)) || "?") <> " CC")
+    IO.puts(dim("  " <> pid))
     IO.puts("")
     IO.puts("  spent today    #{num(get_in(u || %{}, ["consumer", "totals", "cc"]) || 0)} CC")
     IO.puts("  earned today   #{num(get_in(u || %{}, ["provider", "totals", "cc"]) || 0)} CC")
     if src == :cached, do: IO.puts(dim("  (cached — coordinator unreachable)"))
   end
+
+  # Print the full peer id, raw — copy-friendly, pipeable (`lps id | pbcopy`).
+  defp cmd_id, do: IO.puts(Consumer.peer_id())
 
   defp cmd_usage(rest) do
     days = int_opt(rest, "--days", 7)
@@ -1264,6 +1269,7 @@ defmodule LapsusAgent.CLI do
       lps config [max <N> | model <m> | history <N>]
                                           show / set defaults (ask budget, model, chat context)
       lps balance                         peer id + CC balance
+      lps id                              print your full peer id (copy-friendly)
       lps version                         running version + update check
       lps update                          update to the latest release (in place)
       lps help                            this help
