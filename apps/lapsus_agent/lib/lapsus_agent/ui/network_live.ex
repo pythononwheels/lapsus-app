@@ -76,21 +76,26 @@ defmodule LapsusAgent.UI.NetworkLive do
         <div class="trio">
           <.stat n={fmt(@stats["lifetime"]["tokens"])} label="tokens processed" />
           <.stat n={fmt(@stats["lifetime"]["jobs"])} label="jobs served" />
+          <.stat n={fmt(@stats["lifetime"]["peers"])} label="peers" />
+        </div>
+        <div class="trio" style="margin-top:.8rem">
           <.stat n={fmt(@stats["lifetime"]["cc"]) <> " CC"} label="credits settled" />
+          <.stat n={fmt(@stats["lifetime"]["providers"])} label="providers ever" />
+          <.stat n={fmt(@stats["lifetime"]["consumers"])} label="consumers ever" />
+        </div>
+
+        <.lbl t="Online now" top />
+        <div class="trio">
+          <.stat n={fmt(@stats["now"]["peers_online"])} label="peers online" />
+          <.stat n={fmt(@stats["now"]["providers_online"])} label="providers" />
+          <.stat n={fmt(@stats["now"]["models_online"])} label="models" />
         </div>
 
         <.lbl t="Last 7 days" top />
         <div class="trio">
-          <.stat n={fmt(@stats["window7"]["tokens"])} label="tokens" />
-          <.stat n={fmt(@stats["window7"]["jobs"])} label="jobs" />
-          <.stat n={fmt(@stats["window7"]["active_consumers"])} label="active users" />
-        </div>
-
-        <.lbl t="Right now" top />
-        <div class="trio">
-          <.stat n={fmt(@stats["current"]["nodes_online"])} label="nodes online" />
-          <.stat n={fmt(@stats["current"]["providers_online"])} label="providers sharing" />
-          <.stat n={fmt(@stats["current"]["models"])} label="models offered" />
+          <.stat n={fmt(@stats["window"]["tokens"])} label="tokens" />
+          <.stat n={fmt(@stats["window"]["jobs"])} label="jobs" />
+          <.stat n={fmt(@stats["window"]["active_consumers"])} label="active consumers" />
         </div>
 
         <p class="muted" style="margin-top:1.6rem;font-size:.85rem">

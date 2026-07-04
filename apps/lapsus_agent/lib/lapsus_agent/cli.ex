@@ -73,19 +73,29 @@ defmodule LapsusAgent.CLI do
     pid = Consumer.peer_id()
     {usage, src} = fetch_usage(7)
     bal = (usage && usage["balance"]) || 0
-    {models, nodes} = network_data()
+    {models, stats} = network_data()
 
     box(pid, num(bal) <> " CC")
     IO.puts("")
     print_you(usage, 7, src)
     IO.puts("")
-    print_network_home(models, nodes)
+    print_network_home(models, stats)
     IO.puts("")
     print_howto()
   end
 
-  defp print_network_home(all, nodes) do
-    section(net_header(nodes))
+  defp print_network_home(all, stats) do
+    section(net_header(stats))
+
+    life = get_in(stats || %{}, ["lifetime"]) || %{}
+
+    if (life["tokens"] || 0) > 0 do
+      IO.puts(
+        dim(
+          "    #{num(life["tokens"])} tokens · #{num(life["jobs"])} jobs · #{num(life["peers"])} peers — all time"
+        )
+      )
+    end
 
     case all do
       [] ->
@@ -116,19 +126,19 @@ defmodule LapsusAgent.CLI do
   # --- commands ---
 
   defp cmd_models([]) do
-    {all, nodes} = network_data()
-    render_models(Enum.take(all, 5), {:top, length(all)}, nodes)
+    {all, stats} = network_data()
+    render_models(Enum.take(all, 5), {:top, length(all)}, stats)
   end
 
   defp cmd_models(["all" | _]) do
-    {all, nodes} = network_data()
-    render_models(all, {:all, length(all)}, nodes)
+    {all, stats} = network_data()
+    render_models(all, {:all, length(all)}, stats)
   end
 
   defp cmd_models([q | _]) do
-    {all, nodes} = network_data()
+    {all, stats} = network_data()
     matches = Enum.filter(all, &String.contains?(String.downcase(&1["model"]), String.downcase(q)))
-    render_models(matches, {:search, q}, nodes)
+    render_models(matches, {:search, q}, stats)
   end
 
   defp cmd_balance do
@@ -159,11 +169,9 @@ defmodule LapsusAgent.CLI do
 
   # Public network stats from the coordinator (aggregate; nothing per-peer).
   defp cmd_network do
-    url = coordinator_http_base() <> "/api/stats"
-
-    case Req.get(url, connect_options: [timeout: 5_000], receive_timeout: 5_000, retry: false) do
-      {:ok, %Req.Response{status: 200, body: s}} when is_map(s) -> render_network(s)
-      _ -> err("couldn't reach the coordinator at #{url}")
+    case fetch_stats() do
+      s when is_map(s) -> render_network(s)
+      _ -> err("couldn't reach the coordinator at #{coordinator_http_base()}/api/stats")
     end
   end
 
@@ -178,26 +186,28 @@ defmodule LapsusAgent.CLI do
 
   defp render_network(s) do
     life = s["lifetime"] || %{}
-    win = s["window7"] || %{}
-    cur = s["current"] || %{}
+    win = s["window"] || %{}
+    now = s["now"] || %{}
 
     IO.puts("")
     IO.puts("  " <> IO.ANSI.bright() <> "LAPSUS" <> IO.ANSI.reset() <> dim(" · community network"))
 
+    # Lead with the big, ever-growing community numbers.
     section("All time")
     IO.puts("  tokens processed   #{num(life["tokens"] || 0)}")
     IO.puts("  jobs served        #{num(life["jobs"] || 0)}")
     IO.puts("  credits settled    #{num(life["cc"] || 0)} CC")
+    IO.puts("  peers              #{num(life["peers"] || 0)}  #{dim("· #{num(life["providers"] || 0)} providers · #{num(life["consumers"] || 0)} consumers")}")
+
+    section("Online now")
+    IO.puts("  peers              #{num(now["peers_online"] || 0)}")
+    IO.puts("  providers          #{num(now["providers_online"] || 0)}")
+    IO.puts("  models             #{num(now["models_online"] || 0)}")
 
     section("Last 7 days")
     IO.puts("  tokens             #{num(win["tokens"] || 0)}")
     IO.puts("  jobs               #{num(win["jobs"] || 0)}")
-    IO.puts("  active             #{num(win["active_consumers"] || 0)} users · #{num(win["active_providers"] || 0)} providers")
-
-    section("Right now")
-    IO.puts("  nodes online       #{num(cur["nodes_online"] || 0)}")
-    IO.puts("  providers          #{num(cur["providers_online"] || 0)}")
-    IO.puts("  models offered     #{num(cur["models"] || 0)}")
+    IO.puts("  active             #{num(win["active_consumers"] || 0)} consumers · #{num(win["active_providers"] || 0)} providers")
     IO.puts("")
   end
 
@@ -793,34 +803,49 @@ defmodule LapsusAgent.CLI do
 
   # One coordinator round-trip → {models sorted by provider count, nodes online}.
   defp network_data do
-    case Consumer.network() do
-      {:ok, %{"models" => models} = r} ->
-        {Enum.sort_by(models, &{-(&1["providers"] || 0), -(&1["ctx"] || 0)}), r["nodes"]}
+    models =
+      case Consumer.network() do
+        {:ok, %{"models" => models}} -> Enum.sort_by(models, &{-(&1["providers"] || 0), -(&1["ctx"] || 0)})
+        _ -> []
+      end
 
-      _ ->
-        {[], nil}
+    # Peer/community counts come from the coordinator's /api/stats (one source of
+    # truth) so `lps`, `lps models` and `lps network` always agree.
+    {models, fetch_stats()}
+  end
+
+  defp fetch_stats do
+    case Req.get(coordinator_http_base() <> "/api/stats",
+           connect_options: [timeout: 4_000], receive_timeout: 4_000, retry: false) do
+      {:ok, %Req.Response{status: 200, body: s}} when is_map(s) -> s
+      _ -> nil
     end
   end
 
   defp sorted_models, do: elem(network_data(), 0)
 
-  defp net_header(nodes) when is_integer(nodes) and nodes > 0,
-    do: "LAPSUS P2P network · #{nodes} #{if nodes == 1, do: "node", else: "nodes"} active"
+  defp net_header(stats) do
+    case get_in(stats || %{}, ["now", "peers_online"]) do
+      p when is_integer(p) and p > 0 ->
+        "LAPSUS P2P network · #{p} #{if p == 1, do: "peer", else: "peers"} online"
 
-  defp net_header(_), do: "LAPSUS P2P network"
+      _ ->
+        "LAPSUS P2P network"
+    end
+  end
 
   # Full `lps models` view — P2P network header + "available models".
-  defp render_models([], {:search, q}, nodes) do
-    section(net_header(nodes))
+  defp render_models([], {:search, q}, stats) do
+    section(net_header(stats))
     IO.puts(dim("    no models match \"#{q}\"."))
   end
 
-  defp render_models([], _mode, nodes) do
-    section(net_header(nodes))
+  defp render_models([], _mode, stats) do
+    section(net_header(stats))
     IO.puts(dim("    no models online — is a provider sharing?"))
   end
 
-  defp render_models(models, mode, nodes) do
+  defp render_models(models, mode, stats) do
     sub =
       case mode do
         {:top, total} -> "available models · top #{length(models)} of #{total}"
@@ -828,7 +853,7 @@ defmodule LapsusAgent.CLI do
         {:search, q} -> "available models matching \"#{q}\" (#{length(models)})"
       end
 
-    section(net_header(nodes))
+    section(net_header(stats))
     IO.puts(dim("    " <> sub <> ":"))
     Enum.each(Enum.with_index(models, 1), fn {m, i} -> IO.puts("      #{i}. #{model_line(m)}") end)
 
