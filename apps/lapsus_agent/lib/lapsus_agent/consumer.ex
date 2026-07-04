@@ -17,6 +17,10 @@ defmodule LapsusAgent.Consumer do
   alias LapsusCore.{Identity, Receipt}
 
   @default_timeout 180_000
+  # Per-attempt wall-clock budget for the WebRTC connection to open. A failed
+  # connection is only observable as silence, so this caps how long a dead/unreachable
+  # provider costs before we fail over. Overridable via `opts[:connect_timeout]`.
+  @connect_timeout 20_000
 
   @doc """
   Ask `model` the `prompt`. Returns `{:ok, result_map}` or `{:error, reason}`.
@@ -52,7 +56,7 @@ defmodule LapsusAgent.Consumer do
 
     result =
       case await_join(timeout) do
-        :ok -> discover_and_ask(coord, identity, model, prompt, req_opts(opts), timeout, min_ctx)
+        :ok -> discover_and_ask(coord, identity, model, prompt, req_opts(opts), timeout, min_ctx, opts)
         {:error, _} = e -> e
       end
 
@@ -244,51 +248,136 @@ defmodule LapsusAgent.Consumer do
 
   # --- internals ---
 
-  defp discover_and_ask(coord, identity, model, prompt, req_opts, timeout, min_ctx) do
+  # Discover providers for `model` and try them in turn: if one is dead/slow/flapping
+  # (a retryable `:timeout`), fail over to the next offering the same model, within an
+  # overall `timeout` budget. One `job_id` is minted for the whole logical request and
+  # reused across attempts, so the coordinator's per-`request_id`-idempotent `reserve`
+  # holds at most one escrow row regardless of how many providers we try.
+  defp discover_and_ask(coord, identity, model, prompt, req_opts, timeout, min_ctx, opts) do
     case Coordinator.list_providers(coord, model, min_ctx) do
-      {:ok, [%{"peer_id" => provider} | _]} ->
-        {:ok, session} =
-          Session.start_link(
-            role: :offerer,
-            coordinator: coord,
-            remote_peer_id: provider,
-            handler: self()
-          )
-
-        # Globally-unique job id. `System.unique_integer` is only unique within this
-        # BEAM (and resets on restart), so different peers collided in the shared
-        # ledger → "duplicate_job" (provider unpaid). 128 bits of randomness fixes it.
-        job_id = "job-" <> (:crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false))
-        frame = Protocol.encode_request(job_id, model, prompt, req_opts)
-        result = drive(coord, session, identity, frame, timeout)
-        safe_stop(session)
-        result
-
       {:ok, []} ->
         {:error, :no_provider}
 
       {:error, reason} ->
         {:error, reason}
+
+      {:ok, providers} ->
+        # Globally-unique job id (128 bits of randomness) — shared by every attempt so
+        # only one escrow hold exists; the winning receipt clears it (else the reaper).
+        job_id = "job-" <> (:crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false))
+        frame = Protocol.encode_request(job_id, model, prompt, req_opts)
+        deadline = now_ms() + timeout
+        connect_ms = opts[:connect_timeout] || @connect_timeout
+        on_event = opts[:on_event] || fn _event, _meta -> :ok end
+        try_fn = fn provider, dl -> try_provider(coord, identity, provider, frame, dl, connect_ms) end
+
+        providers
+        |> maybe_shuffle(opts)
+        |> failover(deadline, on_event, try_fn)
     end
   end
 
-  defp drive(coord, session, identity, req_frame, timeout) do
+  # Spread load across providers of the same model (and avoid everyone hammering a
+  # flaky providers[0]). Disable via `opts[:shuffle] = false` for deterministic tests.
+  defp maybe_shuffle(providers, opts) do
+    if Keyword.get(opts, :shuffle, true), do: Enum.shuffle(providers), else: providers
+  end
+
+  # Try each provider in turn via `try_fn.(provider_peer_id, deadline)`; return the
+  # first `{:ok, _}`, else fail over on a retryable error while budget remains, else the
+  # last error. `try_fn` is injected so the failover logic is unit-testable without I/O.
+  # Public + `@doc false` for tests only — not part of the intended API.
+  @doc false
+  def failover([], _deadline, _on_event, _try_fn), do: {:error, :no_provider}
+
+  def failover([p | rest], deadline, on_event, try_fn) do
+    provider = p["peer_id"]
+
+    case try_fn.(provider, deadline) do
+      {:ok, _} = ok ->
+        ok
+
+      {:error, reason} = err ->
+        if retryable?(reason) and rest != [] and time_left(deadline) > 0 do
+          on_event.(:failover, %{provider: provider, reason: reason})
+          failover(rest, deadline, on_event, try_fn)
+        else
+          err
+        end
+    end
+  end
+
+  # One attempt against a single provider: open a fresh WebRTC session, drive it, and
+  # tear it down cleanly (keeping the shared `coord` alive for the next attempt).
+  defp try_provider(coord, identity, provider, frame, deadline, connect_ms) do
+    {:ok, session} =
+      Session.start_link(
+        role: :offerer,
+        coordinator: coord,
+        remote_peer_id: provider,
+        handler: self()
+      )
+
+    connect_deadline = min(now_ms() + connect_ms, deadline)
+    result = drive(coord, session, provider, identity, frame, connect_deadline, deadline, false)
+    safe_stop(session)
+    drain_session_messages(session)
+    result
+  end
+
+  # Two-phase wall-clock loop. `deadline` is the connect budget until `{:peer_open}`,
+  # then switches to `overall` (the rest of the global budget) for the response. Every
+  # non-terminal message shortens the wait toward the true deadline (not a reset).
+  defp drive(coord, session, provider, identity, frame, deadline, overall, sent?) do
     receive do
-      {:lapsus_signal, payload} ->
+      # Signals are keyed by the sender peer_id: only feed the *current* provider's
+      # signals to this session — a late offer/answer/ICE from a previous provider
+      # applied here would corrupt this negotiation.
+      {:lapsus_signal, %{"from" => ^provider} = payload} ->
         Session.signal(session, payload)
-        drive(coord, session, identity, req_frame, timeout)
+        drive(coord, session, provider, identity, frame, deadline, overall, sent?)
+
+      {:lapsus_signal, _foreign} ->
+        drive(coord, session, provider, identity, frame, deadline, overall, sent?)
 
       {:peer_open, ^session} ->
-        Session.send_data(session, req_frame)
-        drive(coord, session, identity, req_frame, timeout)
+        unless sent?, do: Session.send_data(session, frame)
+        # switch to the response-phase deadline (rest of the overall budget)
+        drive(coord, session, provider, identity, frame, overall, overall, true)
+
+      {:peer_open, _stale} ->
+        drive(coord, session, provider, identity, frame, deadline, overall, sent?)
 
       {:peer_data, ^session, data} ->
         case Protocol.decode(data) do
           {:response, resp} -> finalize(coord, identity, resp)
-          _ -> drive(coord, session, identity, req_frame, timeout)
+          _ -> drive(coord, session, provider, identity, frame, deadline, overall, sent?)
         end
+
+      {:peer_data, _stale, _} ->
+        drive(coord, session, provider, identity, frame, deadline, overall, sent?)
     after
-      timeout -> {:error, :timeout}
+      time_left(deadline) -> {:error, :timeout}
+    end
+  end
+
+  # Only silence (connect- or response-phase timeout) is retryable — that's the
+  # dead/slow/flapping provider. A `{:provider_error, _}` means the provider *answered*
+  # (content error / insufficient funds), which won't differ at another provider.
+  defp retryable?(:timeout), do: true
+  defp retryable?(_), do: false
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
+  defp time_left(deadline), do: max(0, deadline - now_ms())
+
+  # Flush any messages that were already queued for a torn-down session so they can't
+  # accumulate across a long failover chain (signals are handled by the "from" filter).
+  defp drain_session_messages(session) do
+    receive do
+      {:peer_data, ^session, _} -> drain_session_messages(session)
+      {:peer_open, ^session} -> drain_session_messages(session)
+    after
+      0 -> :ok
     end
   end
 
