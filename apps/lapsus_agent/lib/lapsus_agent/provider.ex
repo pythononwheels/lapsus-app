@@ -23,10 +23,16 @@ defmodule LapsusAgent.Provider do
   alias LapsusCore.{Credits, Identity, Receipt}
 
   @default_model_weight 1.0
-  # "100% contribution" anchor: throughput sustained for this many seconds/day.
-  @anchor_seconds 4 * 3600
   @default_tps 30.0
   @nominal_out_per_req 300
+
+  # Throughput-based idle detection: learn each model's unloaded peak tps, and if a
+  # served job runs below `@busy_ratio` of that peak, assume the owner is using the
+  # machine and pause sharing. `@min_samples` warms the baseline up first; the peak
+  # decays slowly so it adapts to hardware/model changes.
+  @busy_ratio 0.5
+  @baseline_decay 0.97
+  @min_samples 3
 
   # --- public API ---
 
@@ -95,6 +101,9 @@ defmodule LapsusAgent.Provider do
         available: MapSet.new([engine]),
         in_flight: 0,
         tps: @default_tps,
+        # Per-model unloaded-throughput baseline {peak_tps, samples} + pause deadline.
+        baseline_tps: %{},
+        paused_until: 0,
         balance: 0,
         earned_today: 0,
         served_today: 0,
@@ -158,7 +167,8 @@ defmodule LapsusAgent.Provider do
        out_today: state.usage.out,
        served_today: state.served_today,
        remaining_today: max(0, budget - state.usage.out),
-       est_requests: div(budget, @nominal_out_per_req)
+       est_requests: div(budget, @nominal_out_per_req),
+       paused: paused?(state)
      }, state}
   end
 
@@ -169,7 +179,10 @@ defmodule LapsusAgent.Provider do
 
   def handle_call({:set_settings, settings}, _from, state) do
     Settings.save(settings)
-    {:reply, :ok, %{state | settings: settings}}
+    # Turning auto-pause off resumes immediately; reconcile re-advertises accordingly.
+    paused_until = if settings.pause_when_busy, do: state.paused_until, else: 0
+    state = reconcile(%{state | settings: settings, paused_until: paused_until})
+    {:reply, :ok, state}
   end
 
   def handle_call({:set_usage_window, days}, _from, state) do
@@ -331,7 +344,7 @@ defmodule LapsusAgent.Provider do
 
   # A served job finished (reported by its task). `ok?` distinguishes a real
   # answer from a failed generation (for the error-rate health metric).
-  def handle_info({:job_done, consumer, out_tokens, tps, ok?}, state) do
+  def handle_info({:job_done, consumer, model, out_tokens, tps, ok?}, state) do
     usage = %{
       state.usage
       | out: state.usage.out + out_tokens,
@@ -342,16 +355,28 @@ defmodule LapsusAgent.Provider do
     new_tps = if is_number(tps) and tps > 0, do: state.tps * 0.7 + tps * 0.3, else: state.tps
     served = if ok?, do: state.jobs_served + 1, else: state.jobs_served
 
-    {:noreply,
-     %{
-       state
-       | in_flight: max(0, state.in_flight - 1),
-         jobs_served: served,
-         serve_ok: state.serve_ok + if(ok?, do: 1, else: 0),
-         serve_err: state.serve_err + if(ok?, do: 0, else: 1),
-         usage: usage,
-         tps: new_tps
-     }}
+    state = %{
+      state
+      | in_flight: max(0, state.in_flight - 1),
+        jobs_served: served,
+        serve_ok: state.serve_ok + if(ok?, do: 1, else: 0),
+        serve_err: state.serve_err + if(ok?, do: 0, else: 1),
+        usage: usage,
+        tps: new_tps
+    }
+
+    {:noreply, maybe_pause(state, model, tps, ok?)}
+  end
+
+  # After the cooldown, re-advertise — unless a later slow job extended the pause,
+  # in which case that job's own timer will resume us.
+  def handle_info(:resume_sharing, state) do
+    if now_ms() >= state.paused_until do
+      plog("resumed sharing")
+      {:noreply, reconcile(%{state | paused_until: 0})}
+    else
+      {:noreply, state}
+    end
   end
 
   def handle_info({:DOWN, _ref, :process, session, _reason}, state) do
@@ -415,7 +440,7 @@ defmodule LapsusAgent.Provider do
           Logger.info("[provider] refused #{req.model} (#{cons}…): insufficient_funds")
           plog("refused job=#{req.id} model=#{req.model} consumer=#{cons} reason=insufficient_funds")
           Session.send_data(session, Protocol.encode_response(req.id, {:error, :insufficient_funds}))
-          send(parent, {:job_done, consumer, 0, nil, false})
+          send(parent, {:job_done, consumer, req.model, 0, nil, false})
 
         true ->
           case Engine.generate(engine, req.model, req.prompt, opts) do
@@ -435,23 +460,23 @@ defmodule LapsusAgent.Provider do
                   "dur=#{System.monotonic_time(:millisecond) - t0}ms"
               )
 
-              send(parent, {:job_done, consumer, result.out_tokens, result.tokens_per_sec, true})
+              send(parent, {:job_done, consumer, req.model, result.out_tokens, result.tokens_per_sec, true})
 
             {:error, reason} = err ->
               plog("error job=#{req.id} model=#{req.model} consumer=#{cons} reason=#{inspect(reason)} dur=#{System.monotonic_time(:millisecond) - t0}ms")
               Session.send_data(session, Protocol.encode_response(req.id, err))
-              send(parent, {:job_done, consumer, 0, nil, false})
+              send(parent, {:job_done, consumer, req.model, 0, nil, false})
           end
         end
       rescue
         e ->
           plog("crashed job=#{req.id} model=#{req.model} consumer=#{cons} error=#{Exception.message(e)} dur=#{System.monotonic_time(:millisecond) - t0}ms")
           Session.send_data(session, Protocol.encode_response(req.id, {:error, :provider_crashed}))
-          send(parent, {:job_done, consumer, 0, nil, false})
+          send(parent, {:job_done, consumer, req.model, 0, nil, false})
       catch
         kind, reason ->
           plog("crashed job=#{req.id} model=#{req.model} consumer=#{cons} #{kind}=#{inspect(reason)} dur=#{System.monotonic_time(:millisecond) - t0}ms")
-          send(parent, {:job_done, consumer, 0, nil, false})
+          send(parent, {:job_done, consumer, req.model, 0, nil, false})
       end
     end)
   end
@@ -510,7 +535,49 @@ defmodule LapsusAgent.Provider do
   # --- helpers ---
 
   defp daily_budget(state),
-    do: round(state.settings.contribution_pct / 100 * state.tps * @anchor_seconds)
+    do: round(state.settings.contribution_pct / 100 * state.tps * state.settings.anchor_hours * 3600)
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
+  defp paused?(state), do: now_ms() < state.paused_until
+
+  # Learn the model's unloaded-throughput peak; if this job ran far below it, the
+  # owner is likely using the machine → pause sharing (withdraw) for the cooldown.
+  defp maybe_pause(state, _model, _tps, false), do: state
+
+  defp maybe_pause(state, model, tps, true) do
+    {baseline_tps, pause?} = update_baseline(state.baseline_tps, model, tps, state.settings)
+    state = %{state | baseline_tps: baseline_tps}
+
+    if pause? do
+      ms = state.settings.busy_cooldown_s * 1000
+      Process.send_after(self(), :resume_sharing, ms)
+      {peak, _} = Map.get(baseline_tps, model)
+
+      plog(
+        "paused: #{model} ran #{Float.round(tps, 1)} tok/s vs baseline #{Float.round(peak, 1)} " <>
+          "→ machine busy, pausing sharing #{state.settings.busy_cooldown_s}s"
+      )
+
+      reconcile(%{state | paused_until: now_ms() + ms})
+    else
+      state
+    end
+  end
+
+  @doc """
+  Pure throughput-baseline step: fold a job's `tps` into the per-model baseline
+  `{peak, samples}` map and decide whether it signals owner-load (pause). Public +
+  `@doc false` for tests. Returns `{updated_baseline_map, pause?}`.
+  """
+  def update_baseline(baseline_tps, model, tps, settings) when is_number(tps) and tps > 0 do
+    {peak, n} = Map.get(baseline_tps, model, {tps, 0})
+    new_peak = max(peak * @baseline_decay, tps)
+    n2 = n + 1
+    pause? = settings.pause_when_busy and n2 >= @min_samples and tps < new_peak * @busy_ratio
+    {Map.put(baseline_tps, model, {new_peak, n2}), pause?}
+  end
+
+  def update_baseline(baseline_tps, _model, _tps, _settings), do: {baseline_tps, false}
 
   defp roll_day(state) do
     today = Date.utc_today()
@@ -548,10 +615,16 @@ defmodule LapsusAgent.Provider do
   defp model_weight(state, model), do: Map.get(state.model_weights, model, @default_model_weight)
 
   # Effective shared set: a model is on if explicitly overridden, else iff loaded.
+  # While paused (owner using the machine), we advertise nothing — the coordinator
+  # then stops routing to us, so consumers fail over to other providers.
   defp enabled_set(state) do
-    state.models
-    |> Enum.filter(&Map.get(state.overrides, &1, MapSet.member?(state.loaded, &1)))
-    |> MapSet.new()
+    if paused?(state) do
+      MapSet.new()
+    else
+      state.models
+      |> Enum.filter(&Map.get(state.overrides, &1, MapSet.member?(state.loaded, &1)))
+      |> MapSet.new()
+    end
   end
 
   # Re-announce to the coordinator only when the effective set or its capabilities

@@ -10,11 +10,19 @@ defmodule LapsusAgent.Settings do
     * `per_consumer_pct` — max share of the daily budget any single consumer may take.
     * `max_concurrency`  — max simultaneous requests served (1 = one GPU, one job).
     * `max_out_per_req`  — hard cap on output tokens per request (protects VRAM/time).
+    * `anchor_hours`     — what "100% contribution" means: throughput sustained this
+      many hours/day (the reference for the daily-budget math). 4 | 8 | 12.
+    * `pause_when_busy`  — auto-pause sharing when your own use slows the engine down
+      (throughput-based load detection; see `Provider`).
+    * `busy_cooldown_s`  — how long to stay paused after detecting your own load.
   """
   defstruct contribution_pct: 25,
             per_consumer_pct: 25,
             max_concurrency: 1,
             max_out_per_req: 1024,
+            anchor_hours: 4,
+            pause_when_busy: true,
+            busy_cooldown_s: 90,
             # Thousands separator style: "eu" → 1.234, "us" → 1,234.
             number_format: "eu",
             # Which local engine to serve from: "auto" | "openai" | "ollama".
@@ -60,6 +68,9 @@ defmodule LapsusAgent.Settings do
       per_consumer_pct: snap(int(m["per_consumer_pct"], 25), [25, 50, 75, 100]),
       max_concurrency: clamp(int(m["max_concurrency"], 1), 1, 16),
       max_out_per_req: clamp(int(m["max_out_per_req"], 1024), 64, 32_768),
+      anchor_hours: snap(int(m["anchor_hours"], 4), [4, 8, 12]),
+      pause_when_busy: bool(m["pause_when_busy"], true),
+      busy_cooldown_s: clamp(int(m["busy_cooldown_s"], 90), 15, 600),
       number_format: fmt(m["number_format"], "eu"),
       engine: eng(m["engine"], "auto"),
       onboarded: m["onboarded"] == true
@@ -82,6 +93,9 @@ defmodule LapsusAgent.Settings do
       per_consumer_pct: maybe(m["per_consumer_pct"], s.per_consumer_pct, &snap(int(&1, s.per_consumer_pct), [25, 50, 75, 100])),
       max_concurrency: maybe(m["max_concurrency"], s.max_concurrency, &clamp(int(&1, s.max_concurrency), 1, 16)),
       max_out_per_req: maybe(m["max_out_per_req"], s.max_out_per_req, &clamp(int(&1, s.max_out_per_req), 64, 32_768)),
+      anchor_hours: maybe(m["anchor_hours"], s.anchor_hours, &snap(int(&1, s.anchor_hours), [4, 8, 12])),
+      pause_when_busy: maybe(m["pause_when_busy"], s.pause_when_busy, &bool(&1, s.pause_when_busy)),
+      busy_cooldown_s: maybe(m["busy_cooldown_s"], s.busy_cooldown_s, &clamp(int(&1, s.busy_cooldown_s), 15, 600)),
       number_format: maybe(m["number_format"], s.number_format, &fmt(&1, s.number_format)),
       engine: maybe(m["engine"], s.engine, &eng(&1, s.engine)),
       onboarded: s.onboarded
@@ -96,6 +110,10 @@ defmodule LapsusAgent.Settings do
 
   defp eng(v, _d) when v in ["auto", "openai", "ollama"], do: v
   defp eng(_, d), do: d
+
+  defp bool(v, _d) when v in [true, "true", "on", "1"], do: true
+  defp bool(v, _d) when v in [false, "false", "off", "0"], do: false
+  defp bool(_, d), do: d
 
   def default_path do
     System.get_env("LAPSUS_SETTINGS") ||

@@ -155,11 +155,16 @@ defmodule LapsusAgent.UI.DashboardLive do
     </div>
 
     <div :if={@status.running} class="card sec">
-      <h3>Contribution</h3>
+      <div class="row">
+        <h3>Contribution</h3>
+        <span :if={@status.paused} style="font-weight:600;font-size:.82rem;background:#000;color:#fff;padding:.2rem .6rem;border-radius:999px">
+          ⏸ paused — your machine is in use
+        </span>
+      </div>
       <div class="body">
         <div style="margin-bottom:.2rem">
           Sharing <strong style="font-size:1.05rem">{@status.settings.contribution_pct}%</strong>
-          of your AI model when idle
+          of a full day's capacity
         </div>
         <form phx-change="update_settings">
           <input type="range" name="contribution_pct" min="0" max="100" step="5"
@@ -167,9 +172,20 @@ defmodule LapsusAgent.UI.DashboardLive do
           <div class="ticks" style="max-width:520px;margin:.2rem auto 0">
             <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
           </div>
+          <div style="display:flex;align-items:center;gap:.5rem;justify-content:center;margin-top:.7rem">
+            <label class="muted" style="font-size:.85rem">A full day means</label>
+            <select name="anchor_hours">
+              <option :for={h <- [4, 8, 12]} value={h} selected={@status.settings.anchor_hours == h}>{h} h</option>
+            </select>
+            <label class="muted" style="font-size:.85rem">of generation</label>
+          </div>
         </form>
-        <div class="muted" style="font-size:.85rem">
-          When you're not using it, the community can — up to {@status.settings.contribution_pct}% of its time.
+        <div class="muted" style="font-size:.86rem;margin-top:.7rem;line-height:1.55">
+          Your model runs at ~<strong>{@status.tps}</strong> tok/s →
+          up to <strong>~{fmt(@status.daily_budget, @status.settings)}</strong> output tokens/day
+          (≈ {fmt(@status.est_requests, @status.settings)} requests), each request capped at
+          {fmt(@status.settings.max_out_per_req, @status.settings)} tokens.
+          Sharing pauses automatically when your own use slows the model down.
         </div>
       </div>
     </div>
@@ -200,6 +216,17 @@ defmodule LapsusAgent.UI.DashboardLive do
               <input type="number" name="max_out_per_req" min="64" max="32768" step="64" value={@status.settings.max_out_per_req} phx-debounce="blur" />
             </div>
             <div>
+              <label>Auto-pause when busy</label>
+              <select name="pause_when_busy">
+                <option value="true" selected={@status.settings.pause_when_busy}>On</option>
+                <option value="false" selected={!@status.settings.pause_when_busy}>Off</option>
+              </select>
+            </div>
+            <div>
+              <label>Pause cooldown (seconds)</label>
+              <input type="number" name="busy_cooldown_s" min="15" max="600" step="15" value={@status.settings.busy_cooldown_s} phx-debounce="blur" />
+            </div>
+            <div>
               <label>Number format</label>
               <select name="number_format">
                 <option value="eu" selected={@status.settings.number_format == "eu"}>1.234 (European)</option>
@@ -208,6 +235,8 @@ defmodule LapsusAgent.UI.DashboardLive do
             </div>
           </form>
           <div class="muted" style="font-size:.82rem;margin-top:.6rem">
+            Auto-pause watches your model's speed: if a served request runs far below its usual
+            throughput, we assume you're using the machine and stop sharing for the cooldown.
             Per-consumer fairness is handled centrally by the coordinator.
           </div>
           <div class="row" style="border-top:1px solid var(--line);margin-top:.9rem;padding-top:.7rem">
@@ -263,6 +292,19 @@ defmodule LapsusAgent.UI.DashboardLive do
     do: "#{num(ok)} ok · #{num(err)} errors (#{round(err / (ok + err) * 100)}%)"
 
   defp error_rate(_), do: "—"
+
+  # Group thousands using the user's chosen separator (1.234 / 1,234).
+  defp fmt(n, settings) when is_integer(n) do
+    sep = Settings.separator(settings)
+
+    n
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.replace(~r/(\d{3})(?=\d)/, "\\1#{sep}")
+    |> String.reverse()
+  end
+
+  defp fmt(n, _settings), do: to_string(n)
 
   # Stylised per-engine glyphs (hand-drawn stand-ins, not official brand logos).
   attr :engine, :atom, default: nil
