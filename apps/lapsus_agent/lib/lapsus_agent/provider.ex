@@ -104,16 +104,20 @@ defmodule LapsusAgent.Provider do
         usage: %{date: Date.utc_today(), out: 0, requests: 0, per_consumer: %{}}
       }
 
-      # Poll loaded models (≠ available) and earnings from the coordinator.
+      # Poll loaded models (≠ available) and earnings. These states change rarely, so
+      # poll slowly — each engine probe makes LM Studio/Ollama log a full model-list
+      # response, so tight intervals spam the user's engine log for no benefit.
       send(self(), :refresh_loaded)
       send(self(), :refresh_caps)
-      :timer.send_interval(5_000, :refresh_loaded)
+      # Loaded set is stable while sharing (user rarely swaps the loaded model).
+      :timer.send_interval(30_000, :refresh_loaded)
+      # Earnings from the coordinator (no engine call) — fine to keep snappy.
       :timer.send_interval(5_000, :refresh_stats)
-      # Capabilities (context length, multimodal) change rarely — poll slowly.
-      :timer.send_interval(30_000, :refresh_caps)
+      # Capabilities (context length, multimodal) essentially never change.
+      :timer.send_interval(300_000, :refresh_caps)
       # Probe which local engines are reachable (for the engine switch + health dot).
       send(self(), :probe_engines)
-      :timer.send_interval(10_000, :probe_engines)
+      :timer.send_interval(60_000, :probe_engines)
 
       {:ok, state}
     else
