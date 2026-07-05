@@ -101,6 +101,26 @@ defmodule LapsusAgent.Engine do
   def caps(engine, models, opts \\ []), do: module!(engine).caps(models, opts)
 
   @doc """
+  Combined loaded models + capabilities: `{:ok, %{loaded: [name], caps: map}}`.
+  Uses the adapter's single-call `model_status/1` when available (LM Studio serves
+  both from one `/api/v0/models` request — fewer engine-log entries), else falls
+  back to a separate `loaded_models` + `caps`.
+  """
+  @spec model_status(engine(), [String.t()], keyword()) :: {:ok, map()} | {:error, term()}
+  def model_status(engine, models, opts \\ []) do
+    mod = module!(engine)
+
+    if function_exported?(mod, :model_status, 1) do
+      mod.model_status(opts)
+    else
+      with {:ok, loaded} <- mod.loaded_models(opts),
+           {:ok, caps} <- mod.caps(models, opts) do
+        {:ok, %{loaded: loaded, caps: caps}}
+      end
+    end
+  end
+
+  @doc """
   Auto-detect a running local engine and its models. Tries OpenAI-compatible
   (LM Studio) first, then native Ollama. Returns `{:ok, engine, models}` or
   `:error` if none is reachable with at least one model.

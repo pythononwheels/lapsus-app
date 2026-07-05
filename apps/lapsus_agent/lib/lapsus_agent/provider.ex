@@ -113,20 +113,17 @@ defmodule LapsusAgent.Provider do
         usage: %{date: Date.utc_today(), out: 0, requests: 0, per_consumer: %{}}
       }
 
-      # Poll loaded models (≠ available) and earnings. These states change rarely, so
-      # poll slowly — each engine probe makes LM Studio/Ollama log a full model-list
-      # response, so tight intervals spam the user's engine log for no benefit.
-      send(self(), :refresh_loaded)
-      send(self(), :refresh_caps)
-      # Loaded set is stable while sharing (user rarely swaps the loaded model).
-      :timer.send_interval(30_000, :refresh_loaded)
+      # Loaded models + capabilities in ONE engine call (they parse the same
+      # verbose /api/v0/models response), polled slowly — these change rarely and
+      # every probe makes the engine log a full model-list dump. 2 min is plenty.
+      send(self(), :refresh_models)
+      :timer.send_interval(120_000, :refresh_models)
       # Earnings from the coordinator (no engine call) — fine to keep snappy.
       :timer.send_interval(5_000, :refresh_stats)
-      # Capabilities (context length, multimodal) essentially never change.
-      :timer.send_interval(300_000, :refresh_caps)
-      # Probe which local engines are reachable (for the engine switch + health dot).
+      # Probe *other* engines' reachability (the active one is obviously up — we skip
+      # it, so the engine you're actually sharing from is never probe-spammed).
       send(self(), :probe_engines)
-      :timer.send_interval(60_000, :probe_engines)
+      :timer.send_interval(180_000, :probe_engines)
 
       {:ok, state}
     else
@@ -230,30 +227,14 @@ defmodule LapsusAgent.Provider do
     {:noreply, state}
   end
 
-  def handle_info(:refresh_loaded, state) do
-    parent = self()
-    engine = state.engine
-
-    Task.start(fn ->
-      case Engine.loaded_models(engine) do
-        {:ok, names} -> send(parent, {:loaded, MapSet.new(names)})
-        _ -> :ok
-      end
-    end)
-
-    {:noreply, state}
-  end
-
-  def handle_info({:loaded, set}, state), do: {:noreply, reconcile(%{state | loaded: set})}
-
-  def handle_info(:refresh_caps, state) do
+  def handle_info(:refresh_models, state) do
     parent = self()
     engine = state.engine
     models = state.models
 
     Task.start(fn ->
-      case Engine.caps(engine, models) do
-        {:ok, caps} when caps != %{} -> send(parent, {:caps, caps})
+      case Engine.model_status(engine, models) do
+        {:ok, %{loaded: loaded, caps: caps}} -> send(parent, {:model_status, MapSet.new(loaded), caps})
         _ -> :ok
       end
     end)
@@ -261,14 +242,26 @@ defmodule LapsusAgent.Provider do
     {:noreply, state}
   end
 
-  def handle_info({:caps, caps}, state), do: {:noreply, reconcile(%{state | caps: caps})}
+  def handle_info({:model_status, loaded, caps}, state) do
+    # Keep prior caps if the probe returned none (transient blip), so we don't
+    # needlessly re-announce with empty capabilities.
+    caps = if caps == %{}, do: state.caps, else: caps
+    {:noreply, reconcile(%{state | loaded: loaded, caps: caps})}
+  end
 
   def handle_info(:probe_engines, state) do
     parent = self()
+    active = state.engine
 
     Task.start(fn ->
+      # The active engine is obviously reachable (we serve from it) — skip probing it
+      # so we never hit its model-list endpoint just for a health check.
       reachable =
-        for eng <- [:openai, :ollama], match?({:ok, [_ | _]}, Engine.list_models(eng)), into: MapSet.new(), do: eng
+        for eng <- [:openai, :ollama],
+            eng != active,
+            match?({:ok, [_ | _]}, Engine.list_models(eng)),
+            into: MapSet.new([active]),
+            do: eng
 
       send(parent, {:available, reachable})
     end)

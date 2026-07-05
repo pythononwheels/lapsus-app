@@ -52,11 +52,22 @@ defmodule LapsusAgent.Engine.OpenAICompat do
 
   @impl true
   def caps(_models, opts \\ []) do
-    # LM Studio's native REST reports type (llm/vlm/embeddings) + context length.
+    with {:ok, %{caps: caps}} <- model_status(opts), do: {:ok, caps}
+  end
+
+  @doc """
+  Loaded state *and* capabilities from a single native `/api/v0/models` call —
+  both parse the same (verbose) response, so fetching them together halves how
+  often the engine logs a full model-list dump.
+  """
+  def model_status(opts \\ []) do
+    # LM Studio's native REST reports per-model load state + type + context length.
     native = String.replace_suffix(Keyword.get(opts, :base_url, base_url()), "/v1", "/api/v0")
 
     case Req.get(Req.new(base_url: native, receive_timeout: 5_000), url: "/models") do
       {:ok, %{status: 200, body: %{"data" => data}}} ->
+        loaded = data |> Enum.filter(&(&1["state"] == "loaded")) |> Enum.map(& &1["id"])
+
         caps =
           Map.new(data, fn m ->
             {m["id"],
@@ -66,7 +77,7 @@ defmodule LapsusAgent.Engine.OpenAICompat do
              }}
           end)
 
-        {:ok, caps}
+        {:ok, %{loaded: loaded, caps: caps}}
 
       {:ok, %{status: status, body: body}} ->
         {:error, {:http, status, body}}
