@@ -27,12 +27,14 @@ defmodule LapsusAgent.Provider do
   @nominal_out_per_req 300
 
   # Throughput-based idle detection: learn each model's unloaded peak tps, and if a
-  # served job runs below `@busy_ratio` of that peak, assume the owner is using the
-  # machine and pause sharing. `@min_samples` warms the baseline up first; the peak
-  # decays slowly so it adapts to hardware/model changes.
-  @busy_ratio 0.5
-  @baseline_decay 0.97
+  # served job runs below `@busy_ratio` of that peak, that's a "slow" sample. To avoid
+  # false alarms from noisy wall-clock tps (cold starts, context size), we only pause
+  # after `@min_busy_streak` *consecutive* slow jobs. `@min_samples` warms the baseline
+  # up first; the peak decays each job so a one-off fast outlier fades quickly.
+  @busy_ratio 0.4
+  @baseline_decay 0.9
   @min_samples 3
+  @min_busy_streak 2
 
   # --- public API ---
 
@@ -101,9 +103,11 @@ defmodule LapsusAgent.Provider do
         available: MapSet.new([engine]),
         in_flight: 0,
         tps: @default_tps,
-        # Per-model unloaded-throughput baseline {peak_tps, samples} + pause deadline.
+        # Per-model unloaded-throughput baseline {peak_tps, samples} + pause deadline
+        # + a consecutive-slow-jobs counter (a single slow job never pauses).
         baseline_tps: %{},
         paused_until: 0,
+        busy_streak: 0,
         balance: 0,
         earned_today: 0,
         served_today: 0,
@@ -533,25 +537,26 @@ defmodule LapsusAgent.Provider do
   defp now_ms, do: System.monotonic_time(:millisecond)
   defp paused?(state), do: now_ms() < state.paused_until
 
-  # Learn the model's unloaded-throughput peak; if this job ran far below it, the
-  # owner is likely using the machine → pause sharing (withdraw) for the cooldown.
-  defp maybe_pause(state, _model, _tps, false), do: state
+  # Learn the model's unloaded-throughput peak; pause only after a *streak* of jobs
+  # that ran far below it (a single slow job — cold start, big context — never pauses).
+  defp maybe_pause(state, _model, _tps, false), do: %{state | busy_streak: 0}
 
   defp maybe_pause(state, model, tps, true) do
-    {baseline_tps, pause?} = update_baseline(state.baseline_tps, model, tps, state.settings)
-    state = %{state | baseline_tps: baseline_tps}
+    {baseline_tps, slow?} = update_baseline(state.baseline_tps, model, tps)
+    streak = if slow?, do: state.busy_streak + 1, else: 0
+    state = %{state | baseline_tps: baseline_tps, busy_streak: streak}
 
-    if pause? do
+    if state.settings.pause_when_busy and streak >= @min_busy_streak do
       ms = state.settings.busy_cooldown_s * 1000
       Process.send_after(self(), :resume_sharing, ms)
       {peak, _} = Map.get(baseline_tps, model)
 
       plog(
         "paused: #{model} ran #{Float.round(tps, 1)} tok/s vs baseline #{Float.round(peak, 1)} " <>
-          "→ machine busy, pausing sharing #{state.settings.busy_cooldown_s}s"
+          "(#{streak} slow in a row) → machine busy, pausing sharing #{state.settings.busy_cooldown_s}s"
       )
 
-      reconcile(%{state | paused_until: now_ms() + ms})
+      reconcile(%{state | paused_until: now_ms() + ms, busy_streak: 0})
     else
       state
     end
@@ -559,18 +564,19 @@ defmodule LapsusAgent.Provider do
 
   @doc """
   Pure throughput-baseline step: fold a job's `tps` into the per-model baseline
-  `{peak, samples}` map and decide whether it signals owner-load (pause). Public +
-  `@doc false` for tests. Returns `{updated_baseline_map, pause?}`.
+  `{peak, samples}` map and report whether it's a *slow* sample (below the busy
+  ratio, once warmed up). Public + `@doc false` for tests. Returns
+  `{updated_baseline_map, slow?}`. Streak + policy live in `maybe_pause/4`.
   """
-  def update_baseline(baseline_tps, model, tps, settings) when is_number(tps) and tps > 0 do
+  def update_baseline(baseline_tps, model, tps) when is_number(tps) and tps > 0 do
     {peak, n} = Map.get(baseline_tps, model, {tps, 0})
     new_peak = max(peak * @baseline_decay, tps)
     n2 = n + 1
-    pause? = settings.pause_when_busy and n2 >= @min_samples and tps < new_peak * @busy_ratio
-    {Map.put(baseline_tps, model, {new_peak, n2}), pause?}
+    slow? = n2 >= @min_samples and tps < new_peak * @busy_ratio
+    {Map.put(baseline_tps, model, {new_peak, n2}), slow?}
   end
 
-  def update_baseline(baseline_tps, _model, _tps, _settings), do: {baseline_tps, false}
+  def update_baseline(baseline_tps, _model, _tps), do: {baseline_tps, false}
 
   defp roll_day(state) do
     today = Date.utc_today()

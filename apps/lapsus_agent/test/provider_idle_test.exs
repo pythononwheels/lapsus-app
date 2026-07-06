@@ -1,55 +1,45 @@
 defmodule LapsusAgent.ProviderIdleTest do
-  @moduledoc "Deterministic tests for the throughput-based idle-detection decision."
+  @moduledoc "Deterministic tests for the throughput-baseline / slow-job signal."
   use ExUnit.Case, async: true
 
   alias LapsusAgent.Provider
-  alias LapsusAgent.Settings
 
-  @on Settings.from_map(%{"pause_when_busy" => true})
-  @off Settings.from_map(%{"pause_when_busy" => false})
-
-  # Fold a sequence of tps samples through update_baseline; return the final map + last pause?.
-  defp run(samples, settings) do
+  # Fold a sequence of tps samples through update_baseline; return the final map + last slow?.
+  defp run(samples) do
     Enum.reduce(samples, {%{}, false}, fn tps, {bl, _} ->
-      Provider.update_baseline(bl, "m", tps, settings)
+      Provider.update_baseline(bl, "m", tps)
     end)
   end
 
-  test "warms up: no pause before min_samples, even on a slow job" do
-    # first two samples establish the baseline; a slow 3rd would pause, but here all are steady
-    {_bl, pause?} = run([30.0, 30.0], @on)
-    refute pause?
+  test "warms up: no slow signal before min_samples" do
+    {_bl, slow?} = run([30.0, 30.0])
+    refute slow?
   end
 
-  test "pauses when a job runs far below the learned peak" do
-    # peak learns ~30 over 3 fast jobs, then a 10 tok/s job (<50% of 30) → pause
-    {_bl, pause?} = run([30.0, 30.0, 30.0, 10.0], @on)
-    assert pause?
+  test "flags a job that runs far below the learned peak" do
+    # peak learns ~30 over 3 steady jobs, then a 10 tok/s job (< 40% of 30) → slow
+    {_bl, slow?} = run([30.0, 30.0, 30.0, 10.0])
+    assert slow?
   end
 
-  test "does not pause for a mild dip above the ratio" do
-    # 20 tok/s vs ~30 peak = 66% > 50% ratio → not busy
-    {_bl, pause?} = run([30.0, 30.0, 30.0, 20.0], @on)
-    refute pause?
+  test "does not flag a mild dip above the ratio" do
+    # 20 tok/s vs ~30 peak = 66% > 40% ratio → not slow
+    {_bl, slow?} = run([30.0, 30.0, 30.0, 20.0])
+    refute slow?
   end
 
-  test "respects the pause_when_busy toggle" do
-    {_bl, pause?} = run([30.0, 30.0, 30.0, 5.0], @off)
-    refute pause?
-  end
-
-  test "peak rises to the fastest sample (so later contention is measured against it)" do
-    {bl, _} = run([20.0, 40.0, 25.0], @on)
+  test "peak captures the fastest sample (fades on later slower ones)" do
+    {bl, _} = run([20.0, 40.0, 25.0])
     {peak, n} = bl["m"]
-    # captured the 40 peak (minus one slow-decay step to 38.8), not the last 25
-    assert peak >= 38.0
+    # captured the 40 peak (one decay step to 36), not the last 25
+    assert peak > 30.0
     assert n == 3
   end
 
   test "ignores non-positive / nil tps (failed jobs don't move the baseline)" do
-    {bl1, _} = Provider.update_baseline(%{}, "m", 30.0, @on)
-    {bl2, pause?} = Provider.update_baseline(bl1, "m", nil, @on)
+    {bl1, _} = Provider.update_baseline(%{}, "m", 30.0)
+    {bl2, slow?} = Provider.update_baseline(bl1, "m", nil)
     assert bl2 == bl1
-    refute pause?
+    refute slow?
   end
 end

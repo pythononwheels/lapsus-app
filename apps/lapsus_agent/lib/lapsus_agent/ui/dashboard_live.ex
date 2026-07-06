@@ -174,7 +174,7 @@ defmodule LapsusAgent.UI.DashboardLive do
           </div>
           <div style="display:flex;align-items:center;gap:.5rem;justify-content:center;margin-top:.7rem">
             <label class="muted" style="font-size:.85rem">A full day means</label>
-            <select name="anchor_hours">
+            <select name="anchor_hours" style="width:auto;min-width:5rem;flex:0 0 auto">
               <option :for={h <- [4, 8, 12]} value={h} selected={@status.settings.anchor_hours == h}>{h} h</option>
             </select>
             <label class="muted" style="font-size:.85rem">of generation</label>
