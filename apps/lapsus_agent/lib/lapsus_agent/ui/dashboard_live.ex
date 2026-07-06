@@ -172,14 +172,17 @@ defmodule LapsusAgent.UI.DashboardLive do
           <div class="ticks" style="max-width:520px;margin:.2rem auto 0">
             <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
           </div>
-          <div style="display:flex;align-items:center;gap:.5rem;justify-content:center;margin-top:.7rem">
-            <label class="muted" style="font-size:.85rem">A full day means</label>
-            <select name="anchor_hours" style="width:auto;min-width:5rem;flex:0 0 auto">
-              <option :for={h <- [4, 8, 12]} value={h} selected={@status.settings.anchor_hours == h}>{h} h</option>
-            </select>
-            <label class="muted" style="font-size:.85rem">of generation</label>
-          </div>
         </form>
+        <div style="display:flex;align-items:center;gap:.5rem;justify-content:center;margin-top:.7rem;flex-wrap:wrap">
+          <label class="muted" style="font-size:.85rem">A full day means</label>
+          <span style="display:inline-flex;gap:.3rem">
+            <button :for={h <- [4, 8, 12]} type="button" phx-click="update_settings" phx-value-anchor_hours={h}
+              style={"border:1px solid var(--line);border-radius:7px;padding:.28rem .7rem;font:inherit;font-size:.85rem;cursor:pointer;" <> if(@status.settings.anchor_hours == h, do: "background:#000;color:#fff;border-color:#000", else: "background:#fff;color:#000")}>
+              {h}h
+            </button>
+          </span>
+          <label class="muted" style="font-size:.85rem">of generation</label>
+        </div>
         <div class="muted" style="font-size:.86rem;margin-top:.7rem;line-height:1.55">
           Your model runs at ~<strong>{@status.tps}</strong> tok/s →
           up to <strong>~{fmt(@status.daily_budget, @status.settings)}</strong> output tokens/day

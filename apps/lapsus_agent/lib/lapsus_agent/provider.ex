@@ -104,9 +104,10 @@ defmodule LapsusAgent.Provider do
         in_flight: 0,
         tps: @default_tps,
         # Per-model unloaded-throughput baseline {peak_tps, samples} + pause deadline
-        # + a consecutive-slow-jobs counter (a single slow job never pauses).
+        # (nil = not paused; monotonic time is negative at boot, so a 0 sentinel would
+        # read as "paused forever") + a consecutive-slow-jobs counter.
         baseline_tps: %{},
-        paused_until: 0,
+        paused_until: nil,
         busy_streak: 0,
         balance: 0,
         earned_today: 0,
@@ -181,7 +182,7 @@ defmodule LapsusAgent.Provider do
   def handle_call({:set_settings, settings}, _from, state) do
     Settings.save(settings)
     # Turning auto-pause off resumes immediately; reconcile re-advertises accordingly.
-    paused_until = if settings.pause_when_busy, do: state.paused_until, else: 0
+    paused_until = if settings.pause_when_busy, do: state.paused_until, else: nil
     state = reconcile(%{state | settings: settings, paused_until: paused_until})
     {:reply, :ok, state}
   end
@@ -368,9 +369,9 @@ defmodule LapsusAgent.Provider do
   # After the cooldown, re-advertise — unless a later slow job extended the pause,
   # in which case that job's own timer will resume us.
   def handle_info(:resume_sharing, state) do
-    if now_ms() >= state.paused_until do
+    if is_integer(state.paused_until) and now_ms() >= state.paused_until do
       plog("resumed sharing")
-      {:noreply, reconcile(%{state | paused_until: 0})}
+      {:noreply, reconcile(%{state | paused_until: nil})}
     else
       {:noreply, state}
     end
@@ -535,7 +536,8 @@ defmodule LapsusAgent.Provider do
     do: round(state.settings.contribution_pct / 100 * state.tps * state.settings.anchor_hours * 3600)
 
   defp now_ms, do: System.monotonic_time(:millisecond)
-  defp paused?(state), do: now_ms() < state.paused_until
+  defp paused?(%{paused_until: pu}) when is_integer(pu), do: now_ms() < pu
+  defp paused?(_state), do: false
 
   # Learn the model's unloaded-throughput peak; pause only after a *streak* of jobs
   # that ran far below it (a single slow job — cold start, big context — never pauses).
