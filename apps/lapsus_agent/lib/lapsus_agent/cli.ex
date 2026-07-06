@@ -204,6 +204,13 @@ defmodule LapsusAgent.CLI do
     IO.puts("  providers          #{num(now["providers_online"] || 0)}")
     IO.puts("  models             #{num(now["models_online"] || 0)}")
 
+    recent = s["recent"] || %{}
+    h1 = recent["h1"] || %{}
+    h24 = recent["h24"] || %{}
+    section("Recent activity")
+    IO.puts("  last hour          #{num(h1["jobs"] || 0)} jobs · #{num(h1["tokens"] || 0)} tokens")
+    IO.puts("  last 24h           #{num(h24["jobs"] || 0)} jobs · #{num(h24["tokens"] || 0)} tokens")
+
     section("Last 7 days")
     IO.puts("  tokens             #{num(win["tokens"] || 0)}")
     IO.puts("  jobs               #{num(win["jobs"] || 0)}")
