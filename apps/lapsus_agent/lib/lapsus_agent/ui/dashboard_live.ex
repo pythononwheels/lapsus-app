@@ -190,6 +190,21 @@ defmodule LapsusAgent.UI.DashboardLive do
           {fmt(@status.settings.max_out_per_req, @status.settings)} tokens.
           Sharing pauses automatically when your own use slows the model down.
         </div>
+
+        <div style="margin-top:.9rem">
+          <div class="row" style="font-size:.85rem;margin-bottom:.35rem">
+            <span>Today's budget used</span>
+            <span class="muted" style="font-variant-numeric:tabular-nums">
+              {fmt(@status.out_today, @status.settings)} / {fmt(@status.daily_budget, @status.settings)} tok · {budget_pct(@status)}%
+            </span>
+          </div>
+          <div style="height:8px;border-radius:999px;background:var(--line);overflow:hidden">
+            <div style={"height:100%;background:#000;transition:width .4s;width:#{budget_pct(@status)}%"}></div>
+          </div>
+          <div class="muted" style="font-size:.8rem;margin-top:.35rem">
+            {fmt(@status.remaining_today, @status.settings)} tokens left today · {@status.served_today} requests served
+          </div>
+        </div>
       </div>
     </div>
 
@@ -308,6 +323,12 @@ defmodule LapsusAgent.UI.DashboardLive do
   end
 
   defp fmt(n, _settings), do: to_string(n)
+
+  # Share of today's daily output-token budget already consumed (0–100, capped).
+  defp budget_pct(%{daily_budget: b, out_today: o}) when is_integer(b) and b > 0,
+    do: min(100, round(o / b * 100))
+
+  defp budget_pct(_), do: 0
 
   # Stylised per-engine glyphs (hand-drawn stand-ins, not official brand logos).
   attr :engine, :atom, default: nil
