@@ -68,7 +68,7 @@ defmodule LapsusAgent.Provider do
       opts[:identity] ||
         Identity.load_or_create!(opts[:identity_path] || default_identity_path())
 
-    with {:ok, engine, all_models} <- resolve_engine(opts) do
+    with {:ok, engine, all_models, status} <- resolve_engine(opts) do
       # We do text request→response only — drop embedding/TTS models.
       models = Enum.filter(all_models, &text_model?/1)
 
@@ -93,8 +93,8 @@ defmodule LapsusAgent.Provider do
         overrides: %{},
         announced: {MapSet.new(), %{}},
         joined: false,
-        loaded: MapSet.new(),
-        caps: %{},
+        loaded: (status && status.loaded) || MapSet.new(),
+        caps: (status && status.caps) || %{},
         model_weights: opts[:model_weights] || %{},
         settings: opts[:settings] || Settings.load(),
         coordinator: coord,
@@ -127,7 +127,11 @@ defmodule LapsusAgent.Provider do
       # provider's loaded set rarely changes mid-session; when it does, the user hits
       # "Refresh" in the UI. LM Studio JIT-loads on request anyway, so a model that
       # got auto-unloaded still serves (just a slower first token).
-      send(self(), :refresh_models)
+      #
+      # For an explicitly-chosen engine, resolve_engine already made the single
+      # /api/v0/models call (names + loaded + caps), so we seed from `status` and
+      # skip a redundant scan. Auto-detect returns no status → do the one scan here.
+      if is_nil(status), do: send(self(), :refresh_models)
       send(self(), :probe_engines)
       # Earnings from the coordinator (no engine call) — fine to keep snappy.
       :timer.send_interval(5_000, :refresh_stats)
@@ -258,10 +262,18 @@ defmodule LapsusAgent.Provider do
   end
 
   def handle_info({:model_status, loaded, caps}, state) do
-    # Keep prior caps if the probe returned none (transient blip), so we don't
-    # needlessly re-announce with empty capabilities.
-    caps = if caps == %{}, do: state.caps, else: caps
-    {:noreply, reconcile(%{state | loaded: loaded, caps: caps})}
+    # Empty caps = a transient blip: keep prior models/caps rather than re-announcing
+    # with nothing. Otherwise re-derive the full model list from the caps keys (all
+    # models the engine reports) so a user Refresh picks up newly-added models too.
+    state =
+      if caps == %{} do
+        %{state | loaded: loaded}
+      else
+        models = caps |> Map.keys() |> Enum.filter(&text_model?/1)
+        %{state | loaded: loaded, caps: caps, models: models}
+      end
+
+    {:noreply, reconcile(state)}
   end
 
   def handle_info(:probe_engines, state) do
@@ -657,27 +669,37 @@ defmodule LapsusAgent.Provider do
   # We only do text request→response — exclude embedding/TTS models.
   defp text_model?(name), do: not (name =~ ~r/embed|tts/i)
 
+  # Returns {:ok, engine, all_models, status} where `status` is %{loaded, caps} when
+  # resolution already fetched the full model state in one call (so init can skip the
+  # start scan), or nil when only names are known (init then does one scan).
   defp resolve_engine(opts) do
     pref = opts[:engine] || settings_engine(opts)
 
     case {pref, opts[:models]} do
       {nil, _} ->
-        Engine.detect()
+        with_status(Engine.detect())
 
       {:auto, _} ->
-        Engine.detect()
+        with_status(Engine.detect())
 
       {engine, models} when is_list(models) and models != [] ->
-        {:ok, engine, models}
+        {:ok, engine, models, nil}
 
       {engine, _} ->
-        # Honour the chosen engine if it's reachable; otherwise fall back to detect.
-        case Engine.list_models(engine) do
-          {:ok, [_ | _] = models} -> {:ok, engine, models}
-          _ -> Engine.detect()
+        # One native /api/v0/models call yields names + loaded state + caps, so the
+        # start scan needs no second request. Fall back to detect if unreachable.
+        case Engine.model_status(engine, []) do
+          {:ok, %{loaded: loaded, caps: caps}} when caps != %{} ->
+            {:ok, engine, Map.keys(caps), %{loaded: MapSet.new(loaded), caps: caps}}
+
+          _ ->
+            with_status(Engine.detect())
         end
     end
   end
+
+  defp with_status({:ok, engine, models}), do: {:ok, engine, models, nil}
+  defp with_status(other), do: other
 
   # Engine preference persisted in Settings ("openai" | "ollama" | "auto").
   defp settings_engine(opts) do
