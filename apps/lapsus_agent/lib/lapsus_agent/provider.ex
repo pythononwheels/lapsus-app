@@ -53,6 +53,9 @@ defmodule LapsusAgent.Provider do
   def set_settings(server \\ __MODULE__, %Settings{} = settings),
     do: GenServer.call(server, {:set_settings, settings})
 
+  @doc "Re-scan the engine for its model list + loaded state on demand (user-triggered)."
+  def refresh(server \\ __MODULE__), do: GenServer.cast(server, :refresh)
+
   @doc "Set the usage dashboard window (in days) and refresh it."
   def set_usage_window(server \\ __MODULE__, days),
     do: GenServer.call(server, {:set_usage_window, days})
@@ -118,17 +121,16 @@ defmodule LapsusAgent.Provider do
         usage: %{date: Date.utc_today(), out: 0, requests: 0, per_consumer: %{}}
       }
 
-      # Loaded models + capabilities in ONE engine call (they parse the same
-      # verbose /api/v0/models response), polled slowly — these change rarely and
-      # every probe makes the engine log a full model-list dump. 2 min is plenty.
+      # Model list + loaded state and other-engine reachability are fetched ONCE at
+      # start (and again on an explicit user Refresh or an engine switch) — never
+      # polled. Every engine probe makes the engine log a full model-list dump, and a
+      # provider's loaded set rarely changes mid-session; when it does, the user hits
+      # "Refresh" in the UI. LM Studio JIT-loads on request anyway, so a model that
+      # got auto-unloaded still serves (just a slower first token).
       send(self(), :refresh_models)
-      :timer.send_interval(120_000, :refresh_models)
+      send(self(), :probe_engines)
       # Earnings from the coordinator (no engine call) — fine to keep snappy.
       :timer.send_interval(5_000, :refresh_stats)
-      # Probe *other* engines' reachability (the active one is obviously up — we skip
-      # it, so the engine you're actually sharing from is never probe-spammed).
-      send(self(), :probe_engines)
-      :timer.send_interval(180_000, :probe_engines)
 
       {:ok, state}
     else
@@ -191,6 +193,14 @@ defmodule LapsusAgent.Provider do
     days = days |> max(1) |> min(3660)
     send(self(), :refresh_stats)
     {:reply, :ok, %{state | usage_days: days}}
+  end
+
+  @impl true
+  def handle_cast(:refresh, state) do
+    # User pressed "Refresh" — re-scan the engine's models + probe reachability.
+    send(self(), :refresh_models)
+    send(self(), :probe_engines)
+    {:noreply, state}
   end
 
   @impl true

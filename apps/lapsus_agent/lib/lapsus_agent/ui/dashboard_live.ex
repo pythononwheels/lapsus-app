@@ -40,6 +40,11 @@ defmodule LapsusAgent.UI.DashboardLive do
     {:noreply, refresh(socket)}
   end
 
+  def handle_event("refresh_models", _params, socket) do
+    if ProviderControl.running?(), do: Provider.refresh()
+    {:noreply, refresh(socket)}
+  end
+
   def handle_event("toggle_settings", _params, socket) do
     {:noreply, assign(socket, show_settings: !socket.assigns.show_settings)}
   end
@@ -134,8 +139,17 @@ defmodule LapsusAgent.UI.DashboardLive do
     </div>
 
     <div :if={@status.running} class="card sec">
-      <h3>Shared models <span :if={@status.models == []} class="muted">— none detected</span></h3>
+      <div class="row">
+        <h3>Shared models <span :if={@status.models == []} class="muted">— none detected</span></h3>
+        <button type="button" phx-click="refresh_models" title="Re-scan your engine for loaded models"
+          style="border:1px solid var(--line);border-radius:7px;padding:.28rem .7rem;font:inherit;font-size:.82rem;cursor:pointer;background:#fff;color:#000">
+          ↻ Refresh
+        </button>
+      </div>
       <div class="body">
+        <div class="muted" style="font-size:.82rem;margin-bottom:.5rem">
+          Only <strong>loaded</strong> models are shared by default. Load a model in your engine, then hit Refresh.
+        </div>
         <div :if={@status.models != []} class="mrow mhead">
           <span class="muted">Available models on your machine</span>
           <span class="muted">Share</span>
