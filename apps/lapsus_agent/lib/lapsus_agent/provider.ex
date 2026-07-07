@@ -286,7 +286,9 @@ defmodule LapsusAgent.Provider do
       reachable =
         for eng <- [:openai, :ollama],
             eng != active,
-            match?({:ok, [_ | _]}, Engine.list_models(eng)),
+            # retry: false — a down engine (connection refused) should fail fast and
+            # quietly, not spew retry warnings for a mere reachability probe.
+            match?({:ok, [_ | _]}, Engine.list_models(eng, retry: false)),
             into: MapSet.new([active]),
             do: eng
 
@@ -667,7 +669,9 @@ defmodule LapsusAgent.Provider do
   end
 
   # We only do text request→response — exclude embedding/TTS models.
-  defp text_model?(name), do: not (name =~ ~r/embed|tts/i)
+  # Only text request→response models are shareable — exclude embeddings and audio
+  # models (TTS/ASR), some of which aren't named "tts" (e.g. kokoro, voxtral, whisper).
+  defp text_model?(name), do: not (name =~ ~r/embed|tts|kokoro|whisper|voxtral|bark|parler/i)
 
   # Returns {:ok, engine, all_models, status} where `status` is %{loaded, caps} from a
   # single model_status scan (so init needs no second engine call), or nil only when

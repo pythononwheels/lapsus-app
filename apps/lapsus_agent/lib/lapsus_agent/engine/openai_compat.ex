@@ -120,7 +120,8 @@ defmodule LapsusAgent.Engine.OpenAICompat do
   defp client(opts) do
     Req.new(
       base_url: Keyword.get(opts, :base_url, base_url()),
-      receive_timeout: Keyword.get(opts, :receive_timeout, @receive_timeout)
+      receive_timeout: Keyword.get(opts, :receive_timeout, @receive_timeout),
+      retry: Keyword.get(opts, :retry, :safe_transient)
     )
   end
 
