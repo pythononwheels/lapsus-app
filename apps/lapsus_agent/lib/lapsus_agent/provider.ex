@@ -669,37 +669,53 @@ defmodule LapsusAgent.Provider do
   # We only do text request→response — exclude embedding/TTS models.
   defp text_model?(name), do: not (name =~ ~r/embed|tts/i)
 
-  # Returns {:ok, engine, all_models, status} where `status` is %{loaded, caps} when
-  # resolution already fetched the full model state in one call (so init can skip the
-  # start scan), or nil when only names are known (init then does one scan).
+  # Returns {:ok, engine, all_models, status} where `status` is %{loaded, caps} from a
+  # single model_status scan (so init needs no second engine call), or nil only when
+  # the model list was supplied explicitly (then init does the one scan itself).
+  #
+  # Both the auto-detect and explicit-engine paths go through scan_engine/1, so a
+  # provider start makes exactly ONE model-list call to the engine (was two: a plain
+  # /v1/models for detection + a detailed /api/v0/models for loaded state).
   defp resolve_engine(opts) do
     pref = opts[:engine] || settings_engine(opts)
 
     case {pref, opts[:models]} do
-      {nil, _} ->
-        with_status(Engine.detect())
-
-      {:auto, _} ->
-        with_status(Engine.detect())
+      {p, _} when p in [nil, :auto] ->
+        detect_engine()
 
       {engine, models} when is_list(models) and models != [] ->
         {:ok, engine, models, nil}
 
       {engine, _} ->
-        # One native /api/v0/models call yields names + loaded state + caps, so the
-        # start scan needs no second request. Fall back to detect if unreachable.
-        case Engine.model_status(engine, []) do
-          {:ok, %{loaded: loaded, caps: caps}} when caps != %{} ->
-            {:ok, engine, Map.keys(caps), %{loaded: MapSet.new(loaded), caps: caps}}
-
-          _ ->
-            with_status(Engine.detect())
+        # Honour the chosen engine if reachable; otherwise auto-detect.
+        case scan_engine(engine) do
+          {:ok, _, _, _} = ok -> ok
+          :error -> detect_engine()
         end
     end
   end
 
-  defp with_status({:ok, engine, models}), do: {:ok, engine, models, nil}
-  defp with_status(other), do: other
+  # First reachable engine (openai first, then ollama), scanned in one call. Since
+  # openai is tried first, a running LM Studio short-circuits before ollama is probed.
+  defp detect_engine do
+    Enum.find_value([:openai, :ollama], :error, fn engine ->
+      case scan_engine(engine) do
+        {:ok, _, _, _} = ok -> ok
+        :error -> nil
+      end
+    end)
+  end
+
+  # One native model_status call → {names, loaded state, caps} for `engine`, or :error.
+  defp scan_engine(engine) do
+    case Engine.model_status(engine, []) do
+      {:ok, %{loaded: loaded, caps: caps}} when caps != %{} ->
+        {:ok, engine, Map.keys(caps), %{loaded: MapSet.new(loaded), caps: caps}}
+
+      _ ->
+        :error
+    end
+  end
 
   # Engine preference persisted in Settings ("openai" | "ollama" | "auto").
   defp settings_engine(opts) do
