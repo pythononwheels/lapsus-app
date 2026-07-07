@@ -8,7 +8,7 @@ defmodule LapsusAgent.UI.DashboardLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket), do: :timer.send_interval(1500, :tick)
-    {:ok, assign(socket, status: ProviderControl.status(), peer_id: Consumer.peer_id(), error: nil, show_settings: false, quitting: false)}
+    {:ok, assign(socket, status: ProviderControl.status(), peer_id: Consumer.peer_id(), error: nil, show_settings: false, show_all_models: false, quitting: false)}
   end
 
   @impl true
@@ -43,6 +43,10 @@ defmodule LapsusAgent.UI.DashboardLive do
   def handle_event("refresh_models", _params, socket) do
     if ProviderControl.running?(), do: Provider.refresh()
     {:noreply, refresh(socket)}
+  end
+
+  def handle_event("toggle_all_models", _params, socket) do
+    {:noreply, assign(socket, show_all_models: !socket.assigns.show_all_models)}
   end
 
   def handle_event("toggle_settings", _params, socket) do
@@ -154,7 +158,7 @@ defmodule LapsusAgent.UI.DashboardLive do
           <span class="muted">Available models on your machine</span>
           <span class="muted">Share</span>
         </div>
-        <div :for={m <- @status.models} class={"mrow #{unless m.enabled, do: "off"}"}>
+        <div :for={m <- visible_models(@status.models, @show_all_models)} class={"mrow #{unless m.enabled, do: "off"}"}>
           <span>
             <span class="name">{m.name}</span>
             <span :if={m.loaded} class="tag">loaded</span>
@@ -165,6 +169,10 @@ defmodule LapsusAgent.UI.DashboardLive do
             <span class="knob"></span>
           </button>
         </div>
+        <button :if={length(@status.models) > model_preview()} type="button" phx-click="toggle_all_models"
+          style="margin-top:.6rem;background:none;border:0;padding:.2rem 0;font:inherit;font-size:.85rem;color:var(--muted);cursor:pointer;text-decoration:underline">
+          {if @show_all_models, do: "Show fewer", else: "Show all #{length(@status.models)} models"}
+        </button>
       </div>
     </div>
 
@@ -337,6 +345,14 @@ defmodule LapsusAgent.UI.DashboardLive do
   end
 
   defp fmt(n, _settings), do: to_string(n)
+
+  # Model list rendering: loaded models first, then alphabetical; collapsed to a
+  # short preview until the user expands it.
+  @model_preview 5
+  defp model_preview, do: @model_preview
+  defp sorted_models(models), do: Enum.sort_by(models, &{!&1.loaded, &1.name})
+  defp visible_models(models, true), do: sorted_models(models)
+  defp visible_models(models, false), do: models |> sorted_models() |> Enum.take(@model_preview)
 
   # Share of today's daily output-token budget already consumed (0–100, capped).
   defp budget_pct(%{daily_budget: b, out_today: o}) when is_integer(b) and b > 0,
