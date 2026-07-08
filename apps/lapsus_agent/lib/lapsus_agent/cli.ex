@@ -349,7 +349,7 @@ defmodule LapsusAgent.CLI do
     IO.puts(frame_top(model, w))
     IO.puts(margin(dim("▸ " <> truncate(shown_prompt, w - 6))))
     IO.puts("")
-    IO.puts(render_md(answer, w))
+    IO.puts(LapsusAgent.Markdown.to_ansi(answer, w))
     IO.puts("")
     IO.puts(margin(dim("#{num(res.in_tokens)} in / #{num(res.out_tokens)} out tok · #{billing(res)}")))
 
@@ -1260,80 +1260,6 @@ defmodule LapsusAgent.CLI do
         IO.write(:stderr, "\r" <> dim("#{frame} #{label}…"))
         spin(task, label, i + 1)
     end
-  end
-
-  # Markdown → ANSI for chat answers: word-wrapped to a readable width, with a
-  # 2-space margin and hanging indents for lists.
-  defp render_md(text, width) do
-    cw = max(width - 4, 24)
-
-    text
-    |> String.split("\n")
-    |> Enum.map_join("\n", &md_line(&1, cw))
-  end
-
-  defp md_line(line, cw) do
-    cond do
-      Regex.match?(~r/^\s*```/, line) ->
-        margin(dim(line))
-
-      Regex.match?(~r/^\s*\#{1,6}\s+/, line) ->
-        line
-        |> then(&Regex.replace(~r/^\s*\#{1,6}\s+/, &1, ""))
-        |> wrap_words(cw)
-        |> Enum.map_join("\n", &margin(IO.ANSI.bright() <> &1 <> IO.ANSI.reset()))
-
-      Regex.match?(~r/^\s*(---+|\*\*\*+)\s*$/, line) ->
-        margin(dim(String.duplicate("─", min(cw, 48))))
-
-      m = Regex.run(~r/^(\s*)[-*]\s+(.*)$/, line) ->
-        [_, indent, rest] = m
-        list_item(indent, "• ", inline_md(rest), cw)
-
-      m = Regex.run(~r/^(\s*)(\d+\.)\s+(.*)$/, line) ->
-        [_, indent, num, rest] = m
-        list_item(indent, num <> " ", inline_md(rest), cw)
-
-      String.trim(line) == "" ->
-        ""
-
-      true ->
-        line |> inline_md() |> wrap_words(cw) |> Enum.map_join("\n", &margin/1)
-    end
-  end
-
-  # A list item with a hanging indent: continuation lines align under the text.
-  defp list_item(indent, marker, text, cw) do
-    avail = max(cw - String.length(indent) - String.length(marker), 12)
-    [first | more] = wrap_words(text, avail)
-    hang = indent <> String.duplicate(" ", String.length(marker))
-
-    ([indent <> marker <> first] ++ Enum.map(more, &(hang <> &1)))
-    |> Enum.map_join("\n", &margin/1)
-  end
-
-  # Word-wrap ANSI-containing text to `width` *visible* columns → list of lines.
-  defp wrap_words(text, width) do
-    {lines, cur} =
-      text
-      |> String.split(~r/\s+/, trim: true)
-      |> Enum.reduce({[], ""}, fn word, {lines, cur} ->
-        cond do
-          cur == "" -> {lines, word}
-          vlen(cur) + 1 + vlen(word) <= width -> {lines, cur <> " " <> word}
-          true -> {[cur | lines], word}
-        end
-      end)
-
-    Enum.reverse([cur | lines])
-  end
-
-  defp vlen(s), do: s |> String.replace(~r/\e\[[0-9;]*m/, "") |> String.length()
-
-  defp inline_md(s) do
-    s
-    |> then(&Regex.replace(~r/\*\*(.+?)\*\*/, &1, fn _, x -> IO.ANSI.bright() <> x <> IO.ANSI.reset() end))
-    |> then(&Regex.replace(~r/`([^`]+)`/, &1, fn _, x -> IO.ANSI.bright() <> x <> IO.ANSI.reset() end))
   end
 
   defp margin(s), do: "  " <> s

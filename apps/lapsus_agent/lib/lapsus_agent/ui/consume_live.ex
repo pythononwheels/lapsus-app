@@ -321,7 +321,7 @@ defmodule LapsusAgent.UI.ConsumeLive do
   # Render a model's markdown answer to sanitized HTML (untrusted output — MDEx
   # strips scripts and neutralizes dangerous links).
   defp render_md(text) do
-    case MDEx.to_html(text, sanitize: true) do
+    case LapsusAgent.Markdown.to_html(text) do
       {:ok, html} -> Phoenix.HTML.raw(html)
       _ -> text
     end
