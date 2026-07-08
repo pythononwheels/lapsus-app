@@ -80,7 +80,7 @@ defmodule LapsusAgent.Markdown do
     lines |> Enum.reverse() |> Enum.join("\n")
   end
 
-  defp block(%MDEx.Table{nodes: rows, alignments: aligns}, _cw), do: table(rows, aligns)
+  defp block(%MDEx.Table{nodes: rows, alignments: aligns}, cw), do: table(rows, aligns, cw)
 
   # Unknown block: render children if any, else its literal, else drop.
   defp block(%{nodes: ns}, cw) when is_list(ns) and ns != [], do: blocks(ns, cw)
@@ -97,7 +97,7 @@ defmodule LapsusAgent.Markdown do
 
   # --- tables ---
 
-  defp table(rows, aligns) do
+  defp table(rows, aligns, cw) do
     matrix =
       Enum.map(rows, fn %MDEx.TableRow{header: h, nodes: cells} ->
         {h, Enum.map(cells, fn %MDEx.TableCell{nodes: ns} -> inline(ns) end)}
@@ -108,19 +108,20 @@ defmodule LapsusAgent.Markdown do
     if ncols == 0 do
       ""
     else
-      widths =
+      # Natural width per column (≥3 for the alignment marker), then shrink the widest
+      # columns until the whole table fits `cw`; over-long cells wrap onto more lines.
+      natural =
         for c <- 0..(ncols - 1) do
           Enum.reduce(matrix, 3, fn {_h, cells}, acc -> max(acc, vlen(Enum.at(cells, c, ""))) end)
         end
+
+      widths = fit_columns(natural, cw)
 
       top = border(widths, "┌", "┬", "┐")
       mid = border(widths, "├", "┼", "┤")
       bot = border(widths, "└", "┴", "┘")
 
-      body =
-        Enum.map(matrix, fn {header?, cells} ->
-          table_row(cells, widths, aligns, header?)
-        end)
+      body = Enum.map(matrix, fn {header?, cells} -> table_row(cells, widths, aligns, header?) end)
 
       # Separator after the header row (first row).
       rendered =
@@ -133,17 +134,52 @@ defmodule LapsusAgent.Markdown do
     end
   end
 
+  # Shrink the widest column by 1 until sum(widths) fits the content budget (terminal
+  # width minus borders/padding: "│ … " is 3 chars per column plus a trailing "│").
+  defp fit_columns(widths, cw) do
+    n = length(widths)
+    budget = max(cw - 3 * n - 1, n * 6)
+    shrink(widths, budget)
+  end
+
+  defp shrink(widths, budget) do
+    if Enum.sum(widths) <= budget or Enum.max(widths) <= 6 do
+      widths
+    else
+      max_w = Enum.max(widths)
+
+      {out, _} =
+        Enum.reduce(widths, {[], false}, fn w, {acc, done?} ->
+          if not done? and w == max_w, do: {[w - 1 | acc], true}, else: {[w | acc], done?}
+        end)
+
+      out |> Enum.reverse() |> shrink(budget)
+    end
+  end
+
+  # A table row rendered as one or more physical lines: each cell is wrapped to its
+  # column width, and the row is as tall as its tallest cell (short cells padded).
   defp table_row(cells, widths, aligns, header?) do
-    inner =
+    cols =
       widths
       |> Enum.with_index()
-      |> Enum.map_join("│", fn {w, c} ->
-        cell = Enum.at(cells, c, "")
-        cell = if header?, do: bright(cell), else: cell
-        " " <> pad(cell, w, Enum.at(aligns, c, :none)) <> " "
+      |> Enum.map(fn {w, c} ->
+        lines = cells |> Enum.at(c, "") |> wrap(w)
+        lines = if header?, do: Enum.map(lines, &bright/1), else: lines
+        {lines, w, Enum.at(aligns, c, :none)}
       end)
 
-    "│" <> inner <> "│"
+    height = cols |> Enum.map(fn {ls, _w, _a} -> length(ls) end) |> Enum.max()
+
+    for k <- 0..(height - 1) do
+      inner =
+        Enum.map_join(cols, "│", fn {ls, w, al} ->
+          " " <> pad(Enum.at(ls, k, ""), w, al) <> " "
+        end)
+
+      "│" <> inner <> "│"
+    end
+    |> Enum.join("\n")
   end
 
   defp border(widths, l, m, r) do
