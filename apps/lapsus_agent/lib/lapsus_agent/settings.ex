@@ -25,8 +25,15 @@ defmodule LapsusAgent.Settings do
             busy_cooldown_s: 90,
             # Thousands separator style: "eu" → 1.234, "us" → 1,234.
             number_format: "eu",
-            # Which local engine to serve from: "auto" | "openai" | "ollama".
+            # Which engine to serve from: "auto" | "openai" | "ollama" | "other".
             engine: "auto",
+            # "other" = a remote OpenAI-compatible API (NVIDIA etc.). base_url + a
+            # model allowlist; the API key is better set via env LAPSUS_API_KEY on
+            # servers, but may be stored here for the desktop UI (plaintext, ~/.lapsus).
+            api_base_url: "",
+            api_key: "",
+            api_protocol: "openai",
+            api_models: [],
             onboarded: false
 
   @type t :: %__MODULE__{}
@@ -73,6 +80,10 @@ defmodule LapsusAgent.Settings do
       busy_cooldown_s: clamp(int(m["busy_cooldown_s"], 90), 15, 600),
       number_format: fmt(m["number_format"], "eu"),
       engine: eng(m["engine"], "auto"),
+      api_base_url: str(m["api_base_url"], ""),
+      api_key: str(m["api_key"], ""),
+      api_protocol: proto(m["api_protocol"], "openai"),
+      api_models: model_list(m["api_models"], []),
       onboarded: m["onboarded"] == true
     }
   end
@@ -98,6 +109,10 @@ defmodule LapsusAgent.Settings do
       busy_cooldown_s: maybe(m["busy_cooldown_s"], s.busy_cooldown_s, &clamp(int(&1, s.busy_cooldown_s), 15, 600)),
       number_format: maybe(m["number_format"], s.number_format, &fmt(&1, s.number_format)),
       engine: maybe(m["engine"], s.engine, &eng(&1, s.engine)),
+      api_base_url: maybe(m["api_base_url"], s.api_base_url, &str(&1, s.api_base_url)),
+      api_key: maybe(m["api_key"], s.api_key, &str(&1, s.api_key)),
+      api_protocol: maybe(m["api_protocol"], s.api_protocol, &proto(&1, s.api_protocol)),
+      api_models: maybe(m["api_models"], s.api_models, &model_list(&1, s.api_models)),
       onboarded: s.onboarded
     }
   end
@@ -108,8 +123,21 @@ defmodule LapsusAgent.Settings do
   defp fmt(v, _d) when v in ["eu", "us"], do: v
   defp fmt(_, d), do: d
 
-  defp eng(v, _d) when v in ["auto", "openai", "ollama"], do: v
+  defp eng(v, _d) when v in ["auto", "openai", "ollama", "other"], do: v
   defp eng(_, d), do: d
+
+  defp proto(v, _d) when v in ["openai"], do: v
+  defp proto(_, d), do: d
+
+  defp str(v, _d) when is_binary(v), do: String.trim(v)
+  defp str(_, d), do: d
+
+  # Accepts a list of strings or a comma/whitespace-separated string → clean list.
+  defp model_list(v, _d) when is_list(v), do: v |> Enum.map(&to_string/1) |> clean_models()
+  defp model_list(v, _d) when is_binary(v), do: v |> String.split([",", "\n"]) |> clean_models()
+  defp model_list(_, d), do: d
+
+  defp clean_models(list), do: list |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) |> Enum.uniq()
 
   defp bool(v, _d) when v in [true, "true", "on", "1"], do: true
   defp bool(v, _d) when v in [false, "false", "off", "0"], do: false

@@ -17,7 +17,7 @@ defmodule LapsusAgent.CLI do
   history log, both under `~/.lapsus/`.
   """
 
-  alias LapsusAgent.{Consumer, Tools, Version}
+  alias LapsusAgent.{Consumer, Provider, Settings, Tools, Version}
   alias LapsusCore.Credits
 
   # Max tool round-trips per ask before we force a final answer (bounds cost + loops).
@@ -59,6 +59,7 @@ defmodule LapsusAgent.CLI do
       ["chat" | rest] -> cmd_chat(rest)
       ["tools" | rest] -> cmd_tools(rest)
       ["gateway" | rest] -> cmd_gateway(rest)
+      [s | rest] when s in ["share", "provider", "serve"] -> cmd_share(rest)
       ["projects" | _] -> cmd_projects()
       ["donate" | rest] -> cmd_donate(rest)
       ["config" | rest] -> cmd_config(rest)
@@ -695,13 +696,25 @@ defmodule LapsusAgent.CLI do
   defp cmd_config([]) do
     ensure_config_file()
     cfg = read_config()
+    s = Settings.load()
     hdr("Config")
     IO.puts("  max_tokens          #{cfg["max_tokens"] || 800}")
     IO.puts("  default_model       #{model_display(cfg["default_model"])}")
     IO.puts("  max_history_tokens  #{cfg["max_history_tokens"] || 2000}")
     IO.puts("")
+    IO.puts("  " <> dim("provider (sharing):"))
+    IO.puts("  engine              #{s.engine}")
+
+    if s.engine == "other" do
+      key? = s.api_key != "" or System.get_env("LAPSUS_API_KEY") not in [nil, ""]
+      IO.puts("  api_base_url        #{blank_none(LapsusAgent.Engine.OpenAIRemote.base_url(s) || s.api_base_url)}")
+      IO.puts("  api_models          #{blank_none(Enum.join(s.api_models, ", "))}")
+      IO.puts("  api_key             #{if key?, do: "set", else: "(none)"}")
+    end
+
+    IO.puts("")
     IO.puts(dim("  edit directly → #{config_path()}"))
-    IO.puts(dim("  or: lps config max <N> · model <#|name> · history <N>"))
+    IO.puts(dim("  or: lps config max <N> · model <#|name> · history <N> · engine <..> · api-url · api-models · api-key"))
   end
 
   defp cmd_config(["init" | _]) do
@@ -748,7 +761,89 @@ defmodule LapsusAgent.CLI do
     do: IO.puts("max_history_tokens = #{read_config()["max_history_tokens"] || "2000 (default)"}")
 
   defp cmd_config(["model"]), do: IO.puts("default_model = #{model_display(read_config()["default_model"])}")
-  defp cmd_config(_), do: err("usage: lps config [init | max <N> | model <#|name|none>]")
+
+  # --- provider (sharing) config → ~/.lapsus/settings.json ---
+
+  defp cmd_config(["engine", v | _]) when v in ["auto", "openai", "ollama", "other"] do
+    set_setting(%{"engine" => v})
+    IO.puts("Provider engine set to #{v}.")
+
+    if v == "other",
+      do: IO.puts(dim("  then: lps config api-url <URL> · api-models <a,b> · api-key <KEY> (or env LAPSUS_API_KEY)"))
+  end
+
+  defp cmd_config(["engine" | _]), do: err("usage: lps config engine <auto|openai|ollama|other>")
+
+  defp cmd_config(["api-url", v | _]) do
+    set_setting(%{"api_base_url" => v})
+    IO.puts("API base URL set to #{v}.")
+  end
+
+  defp cmd_config(["api-url"]), do: IO.puts("api_base_url = #{blank_none(Settings.load().api_base_url)}")
+
+  defp cmd_config(["api-models", v | _]) do
+    s = set_setting(%{"api_models" => v})
+    IO.puts("Sharing models: #{blank_none(Enum.join(s.api_models, ", "))}")
+  end
+
+  defp cmd_config(["api-models"]),
+    do: IO.puts("api_models = #{blank_none(Enum.join(Settings.load().api_models, ", "))}")
+
+  defp cmd_config(["api-key", v | _]) do
+    set_setting(%{"api_key" => v})
+    IO.puts("API key stored in settings.json.")
+    IO.puts(dim("  on a server, prefer the env var LAPSUS_API_KEY (it overrides this)."))
+  end
+
+  defp cmd_config(["api-key"]) do
+    set? = Settings.load().api_key != "" or System.get_env("LAPSUS_API_KEY") not in [nil, ""]
+    IO.puts("api_key = #{if set?, do: "set", else: "(none)"}")
+  end
+
+  defp cmd_config(_),
+    do: err("usage: lps config [init | max <N> | model <#|name|none> | engine <..> | api-url <URL> | api-models <a,b> | api-key <KEY>]")
+
+  # Merge provider settings into ~/.lapsus/settings.json and return the new struct.
+  defp set_setting(map) do
+    s = Settings.load() |> Settings.update(map)
+    Settings.save(s)
+    s
+  end
+
+  defp blank_none(v) when v in ["", nil], do: "(none)"
+  defp blank_none(v), do: v
+
+  # --- lps share: run a headless provider (share your engine, or a remote API) ---
+
+  defp cmd_share(args) do
+    {opts, _, _} = OptionParser.parse(args, strict: [url: :string, identity: :string])
+    s = Settings.load()
+
+    IO.puts("")
+    section("Sharing")
+    IO.puts("  engine     #{s.engine}")
+
+    if s.engine == "other" do
+      IO.puts("  backend    #{blank_none(LapsusAgent.Engine.OpenAIRemote.base_url(s))}")
+      IO.puts("  models     #{blank_none(Enum.join(LapsusAgent.Engine.OpenAIRemote.models(s), ", "))}")
+    end
+
+    case Provider.start_link(url: opts[:url], identity_path: opts[:identity]) do
+      {:ok, _pid} ->
+        IO.puts(dim("  online — Ctrl-C to stop (= offline)"))
+        Process.sleep(:infinity)
+
+      {:error, :no_local_engine} ->
+        err(
+          "No engine to serve from.\n" <>
+            "  local:  start LM Studio (:1234) or Ollama (:11434)\n" <>
+            "  remote: lps config engine other · api-url <URL> · api-models <a,b>  (+ env LAPSUS_API_KEY)"
+        )
+
+      {:error, reason} ->
+        err("Could not start sharing: #{inspect(reason)}")
+    end
+  end
 
   defp model_display(m) when is_binary(m) and m != "", do: m
   defp model_display(_), do: "(none — picker)"

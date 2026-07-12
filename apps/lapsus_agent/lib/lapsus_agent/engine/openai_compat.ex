@@ -105,7 +105,7 @@ defmodule LapsusAgent.Engine.OpenAICompat do
     case Req.post(client(opts), url: "/chat/completions", json: body) do
       {:ok, %{status: 200, body: resp}} ->
         wall_ms = (System.monotonic_time(:millisecond) - started) * 1.0
-        {:ok, to_result(model, resp, wall_ms)}
+        {:ok, to_result(model, resp, wall_ms, Keyword.get(opts, :engine, :openai))}
 
       {:ok, %{status: status, body: body}} ->
         {:error, {:http, status, body}}
@@ -118,14 +118,20 @@ defmodule LapsusAgent.Engine.OpenAICompat do
   # --- internals ---
 
   defp client(opts) do
-    Req.new(
+    base = [
       base_url: Keyword.get(opts, :base_url, base_url()),
       receive_timeout: Keyword.get(opts, :receive_timeout, @receive_timeout),
       retry: Keyword.get(opts, :retry, :safe_transient)
-    )
+    ]
+
+    # Bearer auth for remote APIs (NVIDIA etc.); local LM Studio/Ollama send none.
+    case opts[:api_key] do
+      k when is_binary(k) and k != "" -> Req.new([{:auth, {:bearer, k}} | base])
+      _ -> Req.new(base)
+    end
   end
 
-  defp to_result(model, resp, wall_ms) do
+  defp to_result(model, resp, wall_ms, engine) do
     usage = resp["usage"] || %{}
     out_tokens = usage["completion_tokens"] || 0
     message = get_in(resp, ["choices", Access.at(0), "message"]) || %{}
@@ -137,7 +143,7 @@ defmodule LapsusAgent.Engine.OpenAICompat do
         else: 0.0
 
     %Result{
-      engine: :openai,
+      engine: engine,
       model: model,
       response: message["content"],
       reasoning: message["reasoning_content"],

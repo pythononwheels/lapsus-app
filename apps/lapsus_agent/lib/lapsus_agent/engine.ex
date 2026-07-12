@@ -75,7 +75,10 @@ defmodule LapsusAgent.Engine do
 
   @engines %{
     ollama: LapsusAgent.Engine.Ollama,
-    openai: LapsusAgent.Engine.OpenAICompat
+    openai: LapsusAgent.Engine.OpenAICompat,
+    # Remote OpenAI-compatible API (NVIDIA etc.) — explicit/config-driven only, never
+    # part of auto-detect or reachability probing.
+    other: LapsusAgent.Engine.OpenAIRemote
   }
 
   @doc "Map of built-in engine selectors to adapter modules."

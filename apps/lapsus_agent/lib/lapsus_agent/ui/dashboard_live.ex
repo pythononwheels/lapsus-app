@@ -69,7 +69,7 @@ defmodule LapsusAgent.UI.DashboardLive do
 
   # Switch the serving engine: persist the choice and restart sharing so the
   # provider re-detects the chosen engine's models.
-  def handle_event("set_engine", %{"engine" => e}, socket) when e in ["openai", "ollama"] do
+  def handle_event("set_engine", %{"engine" => e}, socket) when e in ["openai", "ollama", "other"] do
     cond do
       not ProviderControl.running?() ->
         {:noreply, socket}
@@ -119,26 +119,41 @@ defmodule LapsusAgent.UI.DashboardLive do
     <div :if={@status.running} class="card sec">
       <h3>Engine</h3>
       <div class="body">
-        <div class="enginerow">
-          <button class={"engside #{if @status.engine == :openai, do: "on"}"}
-                  phx-click="set_engine" phx-value-engine="openai" disabled={:openai not in @status.available}>
-            <.engine_icon engine={:openai} size={14} /> LM Studio
-            <span :if={:openai not in @status.available} class="muted" style="font-size:.78rem">(not detected)</span>
-            <span class={"hdot #{if :openai in @status.available, do: "up", else: "down"}"}></span>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+          <button type="button" phx-click="set_engine" phx-value-engine="openai"
+                  disabled={:openai not in @status.available} style={engine_pill(@status.engine, :openai)}>
+            <.engine_icon engine={:openai} size={13} /> LM Studio
+            <span :if={:openai not in @status.available} class="muted" style="font-size:.72rem">· off</span>
           </button>
-          <button class={"sw #{if @status.engine == :ollama, do: "on"}"}
-                  phx-click="set_engine" phx-value-engine={if @status.engine == :openai, do: "ollama", else: "openai"}
-                  disabled={engine_target(@status) not in @status.available}
-                  aria-label="switch engine">
-            <span class="knob"></span>
+          <button type="button" phx-click="set_engine" phx-value-engine="ollama"
+                  disabled={:ollama not in @status.available} style={engine_pill(@status.engine, :ollama)}>
+            <.engine_icon engine={:ollama} size={13} /> Ollama
+            <span :if={:ollama not in @status.available} class="muted" style="font-size:.72rem">· off</span>
           </button>
-          <button class={"engside #{if @status.engine == :ollama, do: "on"}"}
-                  phx-click="set_engine" phx-value-engine="ollama" disabled={:ollama not in @status.available}>
-            <span class={"hdot #{if :ollama in @status.available, do: "up", else: "down"}"}></span>
-            <.engine_icon engine={:ollama} size={14} /> Ollama
-            <span :if={:ollama not in @status.available} class="muted" style="font-size:.78rem">(not detected)</span>
+          <button type="button" phx-click="set_engine" phx-value-engine="other" style={engine_pill(@status.engine, :other)}>
+            ☁ Other (API)
           </button>
         </div>
+
+        <form :if={@status.engine == :other} phx-change="update_settings"
+              style="margin-top:.9rem;display:flex;flex-direction:column;gap:.55rem;max-width:560px">
+          <label class="muted" style="font-size:.8rem">Base URL
+            <input type="text" name="api_base_url" value={@status.settings.api_base_url} phx-debounce="blur"
+                   placeholder="https://integrate.api.nvidia.com/v1" style={engine_input()} />
+          </label>
+          <label class="muted" style="font-size:.8rem">API key (Bearer)
+            <input type="password" name="api_key" value={@status.settings.api_key} phx-debounce="blur"
+                   placeholder="nvapi-…" style={engine_input()} />
+          </label>
+          <label class="muted" style="font-size:.8rem">Models (comma-separated)
+            <input type="text" name="api_models" value={Enum.join(@status.settings.api_models, ", ")} phx-debounce="blur"
+                   placeholder="meta/llama-3.3-70b-instruct, nvidia/nemotron" style={engine_input()} />
+          </label>
+          <span class="muted" style="font-size:.74rem">
+            Remote OpenAI-compatible API — prompts leave the P2P bubble to this endpoint.
+            On a server prefer env <code>LAPSUS_API_KEY</code>. After changing models, hit ↻ Refresh above.
+          </span>
+        </form>
       </div>
     </div>
 
@@ -316,8 +331,20 @@ defmodule LapsusAgent.UI.DashboardLive do
   defp engine_label(other), do: to_string(other)
 
   # The engine the switch would flip to (opposite of the active one).
-  defp engine_target(%{engine: :openai}), do: :ollama
-  defp engine_target(_), do: :openai
+  defp engine_pill(current, val) do
+    base =
+      "border:1px solid var(--line);border-radius:8px;padding:.4rem .8rem;font:inherit;" <>
+        "font-size:.88rem;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;"
+
+    if current == val,
+      do: base <> "background:#000;color:#fff;border-color:#000",
+      else: base <> "background:#fff;color:#000"
+  end
+
+  defp engine_input,
+    do:
+      "display:block;width:100%;margin-top:.2rem;padding:.45rem .6rem;border:1px solid var(--line);" <>
+        "border-radius:8px;font:inherit;font-size:.86rem;color:#000;background:#fff"
 
   defp current_model(%{models: models}) do
     case Enum.filter(models, & &1.loaded) do

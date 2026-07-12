@@ -691,9 +691,12 @@ defmodule LapsusAgent.Provider do
         {:ok, engine, models, nil}
 
       {engine, _} ->
-        # Honour the chosen engine if reachable; otherwise auto-detect.
+        # Honour the chosen engine if reachable; otherwise auto-detect. A remote
+        # engine (:other) is a deliberate choice — keep it even with an empty
+        # allowlist (the user configures models next), never fall back to local.
         case scan_engine(engine) do
           {:ok, _, _, _} = ok -> ok
+          :error when engine == :other -> {:ok, :other, [], %{loaded: MapSet.new(), caps: %{}}}
           :error -> detect_engine()
         end
     end
@@ -728,6 +731,7 @@ defmodule LapsusAgent.Provider do
     case settings.engine do
       "openai" -> :openai
       "ollama" -> :ollama
+      "other" -> :other
       _ -> :auto
     end
   end
