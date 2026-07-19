@@ -11,8 +11,6 @@ defmodule LapsusAgent.API.GatewayController do
 
   alias LapsusAgent.Consumer
 
-  @default_max 1024
-
   # POST /v1/chat/completions
   def chat_completions(conn, params) do
     model = params["model"] |> to_string() |> String.trim()
@@ -28,9 +26,13 @@ defmodule LapsusAgent.API.GatewayController do
       true ->
         {prompt, system} = flatten_messages(messages)
 
+        # Pass the caller's max_tokens straight through (like real OpenAI). When it's
+        # omitted we send nothing — the serving provider's own max_out_per_req is then
+        # the only cap; the gateway never imposes an arbitrary limit of its own.
         opts =
-          [max_tokens: int(params["max_tokens"], @default_max), temperature: num(params["temperature"], 0)]
+          [temperature: num(params["temperature"], 0)]
           |> maybe_put(:system, system)
+          |> maybe_put(:max_tokens, int(params["max_tokens"], nil))
 
         case Consumer.ask(model, prompt, opts) do
           {:ok, res} -> respond(conn, model, res, params["stream"] == true)
